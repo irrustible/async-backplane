@@ -1,8 +1,8 @@
 use crate::{Exit, Link, Pid};
-use futures::{Future, Stream};
 use futures::channel::oneshot;
+use futures::future::{BoxFuture, Future};
 use futures::sink::SinkExt;
-use futures::stream::FuturesUnordered;
+use futures::stream::{FuturesUnordered, Stream};
 use futures::task::{Context, Poll};
 use pin_project::pin_project;
 use std::collections::HashSet;
@@ -14,32 +14,29 @@ use std::pin::Pin;
  */
 
 #[pin_project]
-pub struct Linking<F>
-where F: Future<Output=Result<Pid, Pid>> {
+pub struct Linking<'a> {
   #[pin]
-  pending: FuturesUnordered<F>,
+  pending: FuturesUnordered<BoxFuture<'a, Result<Pid, Pid>>>,
 }
 
-impl<F> Linking<F>
-where F: Future<Output=Result<Pid, Pid>> {
+impl<'a> Linking<'a> {
 
-  pub fn new() -> Linking<F> {
+  pub fn new() -> Linking<'a> {
     Linking { pending: FuturesUnordered::new() }
   }
 
   // we can't do this because we can't write the type of the future :/
   pub fn join(&mut self, pid: Pid, receiver: oneshot::Receiver<()>) {
-    self.pending.push(async move {
-      let match receiver.await {
+    self.pending.push(Box::pin(async move {
+      match receiver.await {
         Ok(_) => Ok(pid),
         Err(_) => Err(pid),
       }
-    })
+    }))
   }
 }
 
-impl<F> Stream for Linking<F>
-where F: Future<Output=Result<Pid, Pid>> {
+impl<'a> Stream for Linking<'a> {
   type Item = Result<Pid, Pid>;
   
   fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<Pid, Pid>>> {
