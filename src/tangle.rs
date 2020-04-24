@@ -1,9 +1,9 @@
+use crate::backend::Timer;
 use crate::fewchores::FewchoresExt;
 use crate::{Address, AddressError, Card, Exited, Message, Name};
 use futures::stream::{FuturesUnordered, StreamExt};
 use intmap::IntMap;
 use piper::{chan, Sender, Receiver};
-use smol::Timer;
 use std::iter;
 use std::time::Duration;
 
