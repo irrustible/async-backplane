@@ -7,6 +7,7 @@ use piper::{chan, Sender, Receiver};
 use std::iter;
 use std::time::Duration;
 
+/// The wires in the back
 pub struct Tangle<T: Clone> {
   pub card: Card<T>,
   tangled: IntMap<Address<T>>,
@@ -92,6 +93,7 @@ impl<T: Clone> Tangle<T> {
   }
 
   /// exit, broadcasting the provided exit message to everybody
+  #[allow(unused_must_use)] // fuck of
   pub async fn exit(mut self, exit: T, timeout: Duration) {
     let name = self.card.name;
     let stream = FuturesUnordered::new();
@@ -108,6 +110,7 @@ impl<T: Clone> Tangle<T> {
     let name = entangle.card.name;
     if self.tangled.get(name.inner).is_none() {
       entangle.reply.send(Ok(self.card.address.clone())).await;
+      self.tangled.insert(name.inner, entangle.card.address);
       Ok(name)
     } else {
       entangle.reply.send(Err(())).await;

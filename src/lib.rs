@@ -1,8 +1,7 @@
-#![feature(type_alias_impl_trait, async_closure)]
+#![feature(type_alias_impl_trait, async_closure, trait_alias)]
 // generators, generator_trait, drain_filter, proc_macro_hygiene
 
 mod backend;
-use backend::*;
 
 mod name;
 pub use name::Name;
