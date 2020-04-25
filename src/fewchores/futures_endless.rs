@@ -1,10 +1,8 @@
 use std::pin::Pin;
-// use futures::future::{BoxFuture, Future};
-// use futures::sink::SinkExt;
-use std::convert::From;
-use std::future::Future;
+use core::convert::From;
+use core::future::Future;
+use core::task::{Context, Poll};
 use futures::stream::{FuturesUnordered, Stream};
-use futures::task::{Context, Poll};
 
 pub struct FuturesEndless<F: Future> {
   inner: FuturesUnordered<F>,
