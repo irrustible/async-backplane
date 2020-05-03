@@ -1,60 +1,97 @@
 # Tingle
 
-I wanted to call it tangle but someone already took that crate name :/
+A WIP minimalist asynchronous reliability backplane inspired by Erlang.
 
-Some experiments in erlang-style concurrency in rust.
+## Overview
+
+Tingle is a minimalist asynchronous reliability backplane - a means of
+structuring our async programs to achieve reliability. 
+
+`Future` already gives us a simple structure for modelling potentially
+incomplete asynchronous computation. Combined with an executor and
+rust's async await syntax, we effectively get the green threads
+experience at a much lower cost.
+
+Tingle tries to bring Erlang's legendary reliability to rust in a way
+that is easy and fun to use. Build highly reliable, efficient sytems!
 
 ## Status.
 
-It doesn't work yet. It's just some stuff we'll need when it does work.
+Getting close to alpha? Doesn't actually run yet.
 
-## Erlang/Rust comparison
+<!-- ## Usage -->
 
-| Feature         | Erlang    | Rust               |
-|-----------------|-----------|--------------------|
-| Shared mutation | No        | No                 |
-| Concurrency     | Processes | Futures            |
-| Messaging       | Mailboxes | Channels           |
-| Backpressure    | No        | Optional           |
-| Links           | Yes       | Kinda (JoinHandle) |
-| Supervision     | Yes       | Not really         |
-| Selective recv  | Yes       | Can be emulated    |
+<!-- Don't. But here's what it might look like when it works: -->
 
-I think processes and futures are pretty comparable, but mailboxes and
-channels are somewhat different in some aspects:
+<!-- ```rust -->
+<!-- use core::time::Duration; -->
+<!-- use tingle::{Entanglement, Kind, Quantum}; -->
+<!-- use piper::chan; -->
 
-1. Erlang mailboxes have no backpressure.
-2. Selective receive is arguably a workaround for lack of channels and
-   has performance implications.
-3. Mailboxes are single consumer, channels may be multi-consumer.
-4. Mailboxes are tied to a process (biology model - send it a message).
+<!-- async fn root_supervisor(&mut q: Quantum) { -->
+<!--   q.spawn(app_supervisor, Kind::Supervisor); -->
+<!-- } -->
 
-This last point is interesting. a Pid serves a dual purpose in erlang,
-in that as well as being a reference for process control
-(i.e. termination), it is the handle to send it messages. This is a
-convenience, but not an essential property - in fact we'd like to be
-able to separate the two where it's convenient.
+<!-- async fn app_supervisor(&mut q: Quantum) { -->
+<!--   q.spawn_link(Kind::Supervisor); -->
+<!-- } -->
 
-## So what will we build?
+<!-- fn main() { -->
+<!--   tingle::run(root_supervisor) -->
+<!-- } -->
+<!-- ``` -->
 
-### Links
+<!-- ## Guide -->
 
-Links are the fundamental basis upon which supervision is built and
-supervision is one of the most important features upon which erlang
-builds its reliability.
+<!-- Participating `Future`s ("quanta") are spawned onto an executor with a -->
+<!-- `Quantum`, a handle into the backplane. Quanta may observe the -->
+<!-- termination ("decoherence") of other quanta through a process known as -->
+<!-- "entanglement". -->
 
-The idea is simple: when a process terminates, you will be
-notified. As the most common use case is to propagate failure, by
-default a process will terminate with an error when a linked process
-terminates with an error. It is also possible to override this and
-perform custom logic, which is how erlang builds supervisors.
 
-### Supervisors
+<!-- It may observe the `Decoherence` of other Quanta when -->
+<!-- they finish executing -->
 
-Once we have links, building supervisors will allow us to build
-supervision trees. And unlike bastion, these will be trees.
+<!-- A `Quantum` corresponds to an erlang process - a logical concurrent -->
+<!-- thread of execution. It may `entangle` and `untangle` (undo -->
+<!-- entanglement) with other quanta if it has their addresses to do -->
+<!-- so. When the `Quantum` exits, it will notify all entangled quannta. -->
 
-A supervisor spawns child tasks, listens for their exit and applies a
-recovery strategy in response. This could range from doing nothing to
-restarting all of the other children in the pool, to restarting itself
-with a rate limit.
+<!-- Under the hood, the set of interactions between two quanta are limited: -->
+
+<!-- * request to entangle with the other -->
+<!-- * request to untangle (undo entanglement) from the other -->
+<!-- * request the other to exit -->
+<!-- * notify the other of our exit -->
+
+<!-- Processes may respond to exit notifications differently. The default -->
+<!-- behaviour is to exit if the result is considered a failure (as -->
+<!-- modelled by the simple `Superposition` trait, which is already -->
+<!-- implemented for `Result`). -->
+
+<!-- A `Supervisor` disables the default behaviour and applies a recovery -->
+<!-- strategy, which may involve restarting other processes or in grave -->
+<!-- circumstances, exiting itself (delegating to *its* supervisor the -->
+<!-- responsibility for restarting it). -->
+
+## Naming
+
+The QM analogy was inspired by the idea of two processes having their
+fate linked by entanglement. Erlang's uses the term 'links' (although
+'monitors' are related to `Observer` entanglement). It's also a quiet
+tribute to Joe Armstrong (the inventor of Erlang), who was a physicist
+before he was a programmer.
+
+Yes, we've taken a little bit of artistic license in interpretation,
+but there's a pleasing similarity with some aspects of QM.
+
+I wanted to call this library 'Tangle' but someone already took the
+crate name.
+
+## Copyright and License
+
+Copyright (c) 2020 James Laver.
+
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at http://mozilla.org/MPL/2.0/.

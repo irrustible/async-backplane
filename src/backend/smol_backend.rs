@@ -2,7 +2,7 @@ use core::future::Future;
 use core::task::{Context, Poll};
 use core::pin::Pin;
 use core::time::Duration;
-use smol;
+use smol::{self, Task};
 
 pub struct Timer {
   inner: smol::Timer,
@@ -24,4 +24,8 @@ impl Future for Timer {
     }
   }
 
+}
+
+pub fn spawn(future: impl Future<Output = ()> + Send + 'static) {
+  Task::spawn(future).detach();
 }

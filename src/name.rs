@@ -11,9 +11,21 @@ pub struct Name {
 
 impl Unpin for Name {}
 
+impl Display for Name {
+  fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+    f.write_fmt(format_args!("#Q<{}>", self.inner))
+  }
+}
+
+impl From<Name> for u64 {
+  fn from(name: Name) -> u64 {
+    name.inner
+  }
+}
+
 impl Name {
   /// Increment the global counter atomically, returning the old value
-  pub fn next() -> Name {
+  pub(crate) fn next() -> Name {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     Name { inner: COUNTER.fetch_add(1, Ordering::SeqCst) }
   }
@@ -22,10 +34,3 @@ impl Name {
     Name { inner }
   }
 }
-
-impl Display for Name {
-  fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
-    f.write_fmt(format_args!("Name({})", self.inner))
-  }
-}
-

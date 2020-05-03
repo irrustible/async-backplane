@@ -4,36 +4,47 @@ version = "0.1.0"
 authors = ["James Laver <james.laver@gmail.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
+
+[features]
+default = ["smol"]
 
 # [dev-dependencies]
 # criterion = "0.3"
 # rand_xoshiro = "0.4"
 # rand_core = "0.5"
 
-
-[features]
-default = ["smol"]
-
 [dependencies]
-# async-task = "1.3"
-# once_cell = "1.3"
-# crossbeam = "0.7"
-# im = "14.3"
+im = "14"
 intmap = "0.7.0"
 
+async-task = "3"
+crossbeam-utils = "0.7"
+maybe-unwind = "0.3"
+# once_cell = "1.3"
+# cooked-waker="2.0.0"
 # tracing = "0.1"
-futures = "0.3"
-# maybe-unwind = "0.2" # getting more information out of stack unwinds in tests
 
 piper = {git = "https://github.com/stjepang/piper"}
+# piper = "0.1"
 
-# errors - hard pinned, dtolnay has a habit of breaking things
-anyhow = "1.0.28"
-thiserror = "1.0.14"
+# errors - hard pinned, dtolnay has a habit of breaking semver
+thiserror = "1.0.16"
+# anyhow = "1.0.28" # not presently used
+
+[dependencies.futures]
+version = "0.3"
+default-features = false
+features = ["std"]
+
+# optional deps
 
 [dependencies.smol]
-path = "../smol"
+git = "https://github.com/stjepang/smol"
 optional = true
 
 [dependencies.tokio]
@@ -44,6 +55,4 @@ optional = true
 
 [dependencies.async-std]
 version = "1.5"
-# features = ["time"]
-# default-features = false
 optional = true
