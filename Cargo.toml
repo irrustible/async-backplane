@@ -1,58 +1,17 @@
 [package]
 name = "tingle"
 version = "0.1.0"
+readme = "README.md"
+license = "MPL-2.0"
 authors = ["James Laver <james.laver@gmail.com>"]
 edition = "2018"
 
-[profile.dev]
-panic = "unwind"
-
-[profile.release]
-panic = "unwind"
-
-[features]
-default = ["smol"]
-
-# [dev-dependencies]
-# criterion = "0.3"
-# rand_xoshiro = "0.4"
-# rand_core = "0.5"
-
 [dependencies]
-im = "14"
-intmap = "0.7.0"
+event-listener = "2.0"
+futures = "0.3"
+intmap = "0.7"
+fastrand = "1.1"
+piper = "0.1"
 
-async-task = "3"
-crossbeam-utils = "0.7"
-maybe-unwind = "0.3"
-# once_cell = "1.3"
-# cooked-waker="2.0.0"
-# tracing = "0.1"
-
-piper = {git = "https://github.com/stjepang/piper"}
-# piper = "0.1"
-
-# errors - hard pinned, dtolnay has a habit of breaking semver
-thiserror = "1.0.16"
-# anyhow = "1.0.28" # not presently used
-
-[dependencies.futures]
-version = "0.3"
-default-features = false
-features = ["std"]
-
-# optional deps
-
-[dependencies.smol]
-git = "https://github.com/stjepang/smol"
-optional = true
-
-[dependencies.tokio]
-version = "0.2"
-features = ["time"]
-default-features = false
-optional = true
-
-[dependencies.async-std]
-version = "1.5"
-optional = true
+[dev-dependencies]
+smol = "0.1"
