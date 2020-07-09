@@ -1,294 +1,291 @@
-use core::cell::UnsafeCell;
-use core::fmt::{self, Debug, Display, Formatter};
-use core::ops::Deref;
+use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use event_listener::{Event, EventListener};
-use futures::prelude::*;
-use intmap::IntMap;
-use piper::{Receiver, Sender};
+use pin_project_lite::pin_project;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
-#[derive(Eq, PartialEq, Copy, Clone, Debug)]
-pub struct Name(u64);
+// RUNNING -> ENTANGLED_SUCCEEDED -> ENTANGLED_FAILED -> SUCCEEDED -> FAILED
+const RUNNING: u8 = 0;
+const SUCCEEDED: u8 = 1 << 0;
+const FAILED: u8 = 1 << 1;
+const ENTANGLED: u8 = 1 << 2;
 
-pub trait Superposition: Clone + Unpin + Send + Sync {}
-impl<T: Clone + Unpin + Send + Sync> Superposition for T {}
+const ENTANGLED_SUCCEEDED: u8 = ENTANGLED | SUCCEEDED;
+const ENTANGLED_FAILED: u8 = ENTANGLED | FAILED;
 
-const DEFAULT_CHAN_CAP: usize = 8;
-
-pub struct Quantum<S: Superposition> {
-    name: Name,
-    sender: Sender<Boson<S>>,
-    recver: Receiver<Boson<S>>,
-    delay: Event,
-    delayed: Arc<Delayed<S>>,
-    observables: IntMap<Observable<S>>,
-    observed: Vec<S>,
+pin_project! {
+    pub struct Particle<F> {
+        #[pin]
+        fut: F,
+        inner: Arc<Inner>,
+        entangled: HashMap<*const Inner, Wave>,
+    }
 }
 
-struct Delayed<S: Superposition> {
-    val: UnsafeCell<Option<S>>,
+pub struct Wave {
+    inner: Arc<Inner>,
+    listener: Option<EventListener>,
 }
 
 #[derive(Debug)]
-struct Observable<S: Superposition> {
-    tangle: Tangle<S>,
-    entanglement: Entanglement,
-}
-
-pub struct Tangle<S: Superposition> {
-    name: Name,
-    sender: Sender<Boson<S>>,
-    delay: Option<EventListener>,
-    delayed: Arc<Delayed<S>>,
-}
-
-enum Boson<S: Superposition> {
-    Entangle(Tangle<S>),
-    Untangle(Name),
-}
-
-#[derive(Eq, PartialEq, Copy, Clone, Debug)]
-pub enum Entanglement {
-    Observer,
+pub enum Error {
+    Particle(anyhow::Error),
+    Wave,
     Entangled,
 }
 
-impl Name {
-    pub fn random() -> Self {
-        Name(fastrand::u64(..))
+struct Inner {
+    status: AtomicU8,
+    event: Event,
+}
+
+
+impl<F> Particle<F> {
+    pub fn new<T, E>(fut: F) -> Self
+    where
+        F: Future<Output = Result<T, E>>,
+        E: Into<anyhow::Error>,
+    {
+        Particle {
+            fut,
+            inner: Arc::new(Inner {
+                status: AtomicU8::new(RUNNING),
+                event: Event::new(),
+            }),
+            entangled: HashMap::new(),
+        }
+    }
+
+    pub fn as_wave(&self) -> Wave {
+        Wave {
+            inner: self.inner.clone(),
+            listener: None,
+        }
+    }
+
+    pub fn entangle(&mut self, with: Wave) {
+        if !Arc::ptr_eq(&self.inner, &with.inner) {
+            self.entangled.insert(&*with.inner as _, with);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn status(&self) -> u8 {
+        self.inner.status.load(Ordering::SeqCst)
     }
 }
 
-impl<S: Superposition> Quantum<S> {
-    pub fn new(name: Name) -> Self {
-        Self::with_chan_cap(name, DEFAULT_CHAN_CAP)
+impl<F> Particle<F> {
+    fn succeeded(self: Pin<&mut Self>) {
+        self.inner.succeeded();
+        self.entangled_succeeded(false);
     }
 
-    pub fn with_chan_cap(name: Name, cap: usize) -> Self {
-        let (sender, recver) = piper::chan(cap);
+    fn failed(self: Pin<&mut Self>) {
+        self.inner.failed();
+        self.entangled_failed(false);
+    }
 
-        Quantum {
-            name,
-            sender,
-            recver,
-            delay: Event::new(),
-            delayed: Arc::new(Delayed::new()),
-            observables: IntMap::new(),
-            observed: Vec::new(),
+    // Returns `true` if the new status of the particle and its entangled waves is equal to
+    // `ENTANGLED_SUCCEEDED` or `SUCCEEDED`, or `false` if it is equal to `ENTANGLED_FAILED` or
+    // `FAILED`.
+    fn entangled_succeeded(mut self: Pin<&mut Self>, inner: bool) -> bool {
+        if inner && !self.inner.entangled_succeeded() {
+            self.entangled_failed(false);
+            return false;
+        }
+
+        let mut failed = false;
+        for wave in self.as_mut().project().entangled.values_mut() {
+            if !wave.inner.entangled_succeeded() {
+                failed = true;
+                break;
+            }
+        }
+
+        if failed {
+            self.entangled_failed(false);
+            false
+        } else {
+            self.project().entangled.clear();
+            true
         }
     }
 
-    pub fn name(&self) -> Name {
-        self.name
-    }
+    fn entangled_failed(self: Pin<&mut Self>, inner: bool) {
+        if inner {
+            self.inner.entangled_failed();
+        }
 
-    pub fn tangle(&self) -> Tangle<S> {
-        Tangle {
-            name: self.name,
-            sender: self.sender.clone(),
-            delay: Some(self.delay.listen()),
-            delayed: self.delayed.clone(),
+        for (_, wave) in self.project().entangled.drain() {
+            wave.inner.entangled_failed();
+        }
+    }
+}
+
+impl Inner {
+    fn succeeded(&self) {
+        let mut status = RUNNING;
+        loop {
+            // [...] -> SUCCEEDED -> FAILED
+            match self.status.compare_exchange_weak(status, SUCCEEDED, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(RUNNING) => {
+                    self.event.notify(!0);
+                    break;
+                }
+                Ok(_) | Err(FAILED) | Err(SUCCEEDED) => break,
+                Err(cur) => status = cur,
+            }
         }
     }
 
-    pub async fn entangle(&mut self, with: Tangle<S>, entanglement: Entanglement) {
-        if self.observables.contains_key(*with.name) {
-            return;
+    fn failed(&self) {
+        // [...] -> FAILED
+        if self.status.swap(FAILED, Ordering::SeqCst) == RUNNING {
+            self.event.notify(!0);
         }
-
-        if entanglement.is_entangled() {
-            with.sender.send(Boson::Entangle(self.tangle())).await;
-        }
-
-        self.observables.insert(
-            *with.name,
-            Observable {
-                tangle: with,
-                entanglement,
-            },
-        );
     }
 
-    pub async fn untangle(&mut self, from: Name) {
-        match self.observables.remove(*from) {
-            Some(observable) if observable.entanglement.is_entangled() => {
-                observable
-                    .tangle
-                    .sender
-                    .send(Boson::Untangle(self.name))
-                    .await
+    // Returns `true` if the new status is equal to `ENTANGLED_SUCCEEDED` or `SUCCEEDED`, or `false`
+    // if it is equal to `ENTANGLED_FAILED` or `FAILED`.
+    fn entangled_succeeded(&self) -> bool {
+        // RUNNING -> ENTANGLED_SUCCEEDED -> [...]
+        match self.status.compare_and_swap(RUNNING, ENTANGLED_SUCCEEDED, Ordering::SeqCst) {
+            RUNNING => {
+                self.event.notify(!0);
+                true
+            }
+            FAILED | ENTANGLED_FAILED => false,
+            _ => true,
+        }
+    }
+
+    fn entangled_failed(&self) {
+        let mut status = RUNNING;
+        loop {
+            // [...] -> ENTANGLED_FAILED -> SUCCEEDED -> FAILED
+            match self.status.compare_exchange_weak(status, ENTANGLED_FAILED, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(RUNNING) => {
+                    self.event.notify(!0);
+                    break;
+                }
+                Ok(_) | Err(ENTANGLED_FAILED) | Err(SUCCEEDED) | Err(FAILED) => break,
+                Err(cur) => status = cur,
+            }
+        }
+    }
+}
+
+impl<F, T, E> Future for Particle<F>
+where
+    F: Future<Output = Result<T, E>>,
+    E: Into<anyhow::Error>,
+{
+    type Output = Result<Option<T>, Error>;
+
+    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+        let this = self.as_mut().project();
+
+        // Check the particle's current state and eventually propagate it to its entangled waves.
+        match this.inner.status.load(Ordering::SeqCst) {
+            SUCCEEDED | ENTANGLED_SUCCEEDED => return Poll::Ready(Ok(None)),
+            FAILED => {
+                self.entangled_failed(false);
+                return Poll::Ready(Err(Error::Wave));
+            }
+            ENTANGLED_FAILED => {
+                self.entangled_failed(false);
+                return Poll::Ready(Err(Error::Entangled));
             }
             _ => (),
         }
-    }
 
-    pub fn exit(self, value: S) {
-        // This is safe because only this method writes to `val`, it is guaranteed
-        // that other methods won't read from it before `notify()` is called, and
-        // it is guaranteed that this method can't be called twice (since it takes
-        // `self`).
-        let val = unsafe { self.delayed.val.get().as_mut().unwrap() };
-        *val = Some(value);
-
-        self.delay.notify(!0);
-    }
-}
-
-impl<S: Superposition> Delayed<S> {
-    fn new() -> Self {
-        Delayed {
-            val: UnsafeCell::new(None),
-        }
-    }
-}
-
-impl<S: Superposition> Tangle<S> {
-    pub fn name(&self) -> Name {
-        self.name
-    }
-}
-
-impl Entanglement {
-    pub fn is_observer(self) -> bool {
-        self == Entanglement::Observer
-    }
-
-    pub fn is_entangled(self) -> bool {
-        self == Entanglement::Entangled
-    }
-}
-
-impl<S: Superposition> Stream for Quantum<S> {
-    type Item = S;
-
-    fn poll_next(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Option<Self::Item>> {
-        while let Some(boson) = self.recver.try_recv() {
-            match boson {
-                Boson::Entangle(with) => {
-                    self.observables
-                        .insert(
-                            *with.name,
-                            Observable {
-                                tangle: with,
-                                entanglement: Entanglement::Entangled,
-                            },
-                        );
-                },
-                Boson::Untangle(from) => {
-                    self.observables
-                        .remove(*from);
-                },
+        // Check for entangled waves whose status is `SUCCEEDED` or `ENTANGLED_SUCCEEDED` and stop
+        // when finding one whose status is `FAILED` or `ENTANGLED_FAILED`.
+        let mut status = RUNNING;
+        for mut wave in this.entangled.values_mut() {
+            match Pin::new(&mut wave).poll(ctx) {
+                Poll::Ready(Ok(())) => status = SUCCEEDED,
+                Poll::Ready(Err(_)) => {
+                    status = FAILED;
+                    break;
+                }
+                Poll::Pending => (),
             }
         }
 
-        if let observed @ Some(_) = self.observed.pop() {
-            return Poll::Ready(observed);
+        // If at least one entangled wave's status wasn't `RUNNING`, update the status of the
+        // particle and all its entangled waves.
+        match status {
+            SUCCEEDED => {
+                if self.entangled_succeeded(true) {
+                    return Poll::Ready(Ok(None));
+                } else {
+                    return Poll::Ready(Err(Error::Entangled));
+                }
+            },
+            FAILED => {
+                self.entangled_failed(true);
+                return Poll::Ready(Err(Error::Entangled));
+            }
+            _ => (),
         }
 
-        let mut exited = Vec::new();
-        for (name, observable) in self.observables.iter_mut() {
-            if let Poll::Ready(observed) = Pin::new(&mut observable.tangle).poll(ctx) {
-                exited.push((*name, observed));
+        // Otherwise, poll the inner future and eventually update statuses.
+        match this.fut.poll(ctx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(ok)) => {
+                self.succeeded();
+                Poll::Ready(Ok(Some(ok)))
+            }
+            Poll::Ready(Err(err)) => {
+                self.failed();
+                Poll::Ready(Err(Error::Particle(err.into())))
             }
         }
+    }
+}
 
-        if exited.len() > 1 {
-            for (name, observed) in exited.drain(1..) {
-                self.observables.remove(name);
-                self.observed.push(observed);
-            }
-        }
+impl Future for Wave {
+    type Output = Result<(), Error>;
 
-        if let Some((_, observed)) = exited.pop() {
-            Poll::Ready(Some(observed))
+    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+        let mut listener = if let Some(listener) = self.listener.take() {
+            listener
         } else {
+            // Create a new `EventListener` first to be sure that the wave's status isn't updated
+            // between the time we first check it and the time we finish creating the listener.
+            let listener = self.inner.event.listen();
+            match self.inner.status.load(Ordering::SeqCst) {
+                SUCCEEDED | ENTANGLED_SUCCEEDED => return Poll::Ready(Ok(())),
+                FAILED => return Poll::Ready(Err(Error::Wave)),
+                ENTANGLED_FAILED => return Poll::Ready(Err(Error::Entangled)),
+                _ => listener,
+            }
+        };
+
+        if Pin::new(&mut listener).poll(ctx).is_ready() {
+            match self.inner.status.load(Ordering::SeqCst) {
+                SUCCEEDED | ENTANGLED_SUCCEEDED => Poll::Ready(Ok(())),
+                FAILED => Poll::Ready(Err(Error::Wave)),
+                ENTANGLED_FAILED => Poll::Ready(Err(Error::Entangled)),
+                _ => unreachable!(),
+            }
+        } else {
+            self.listener = Some(listener);
             Poll::Pending
         }
     }
 }
 
-impl<S: Superposition> Future for Tangle<S> {
-    type Output = S;
-
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-        if let Some(delay) = self.delay.as_mut() {
-            match Pin::new(delay).poll(ctx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(()) => {
-                    self.delay.take();
-
-                    // This is safe because, if a notification has been received, then
-                    // we know that `exit()` has been called and this method guarantees
-                    // that `val` won't written to after that.
-                    let val = unsafe { self.delayed.val.get().as_ref().unwrap() };
-                    Poll::Ready(val.clone().unwrap())
-                }
-            }
-        } else {
-            // This is safe because, if a notification has been received, then
-            // we know that `exit()` has been called and this method guarantees
-            // that `val` won't written to after that.
-            let val = unsafe { self.delayed.val.get().as_ref().unwrap() };
-            Poll::Ready(val.clone().unwrap())
+impl Clone for Wave {
+    fn clone(&self) -> Self {
+        Wave {
+            inner: self.inner.clone(),
+            listener: None,
         }
     }
 }
-
-impl From<u64> for Name {
-    fn from(name: u64) -> Self {
-        Name(name)
-    }
-}
-
-impl Deref for Name {
-    type Target = u64;
-
-    fn deref(&self) -> &u64 {
-        &self.0
-    }
-}
-
-impl Display for Name {
-    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        Display::fmt(&self.0, fmt)
-    }
-}
-
-impl<S: Superposition + Debug> Debug for Quantum<S> {
-    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        fmt.debug_struct("Quantum")
-            .field("name", &self.name)
-            .field("sender", &self.sender)
-            .field("recver", &self.recver)
-            .field("delay", &self.delay)
-            .field("delayed", &Option::<S>::None)
-            .field("observables", &self.observables)
-            .field("observed", &self.observed)
-            .finish()
-    }
-}
-
-impl<S: Superposition + Debug> Debug for Tangle<S> {
-    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        let mut fmt = fmt.debug_struct("Tangle");
-        fmt.field("name", &self.name)
-            .field("sender", &self.sender)
-            .field("delay", &self.delay);
-
-        if self.delay.is_some() {
-            fmt.field("delayed", &Option::<S>::None);
-        } else {
-            // This is safe because, if a notification has been received, then
-            // we know that `exit()` has been called and this method guarantees
-            // that `val` won't written to after that.
-            fmt.field("delayed", unsafe { &*self.delayed.val.get() });
-        }
-
-        fmt.finish()
-    }
-}
-
-unsafe impl<S: Superposition> Send for Delayed<S> {}
-unsafe impl<S: Superposition> Sync for Delayed<S> {}

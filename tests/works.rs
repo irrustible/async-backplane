@@ -1,50 +1,25 @@
+use futures::channel::oneshot::{self, Canceled};
 use futures::prelude::*;
-use tingle::{Entanglement, Name, Quantum};
+use std::io;
+use tingle::*;
 
 #[test]
-fn observer() {
-    let name_1 = Name::random();
-    let name_2 = Name::random();
+fn works() {
+    let (sender, recver) = oneshot::channel();
 
-    let mut quantum_1 = Quantum::<i32>::new(name_1);
-    let quantum_2 = Quantum::<i32>::new(name_2);
+    let mut p1 = Particle::new::<(), io::Error>(future::pending());
+    let p2 = Particle::new::<(), Canceled>(future::pending());
+    let mut p3 = Particle::new::<(), Canceled>(recver);
 
-    assert_eq!(quantum_1.name(), name_1);
-    assert_eq!(quantum_2.name(), name_2);
+    p1.entangle(p2.as_wave());
+    p3.entangle(p2.as_wave());
 
-    let tangle_1 = quantum_1.tangle();
-    let tangle_2 = quantum_2.tangle();
+    drop(sender);
 
-    assert_eq!(tangle_1.name(), name_1);
-    assert_eq!(tangle_2.name(), name_2);
-
-    smol::run(quantum_1.entangle(tangle_2, Entanglement::Observer));
-
-    quantum_2.exit(42);
-
-    assert_eq!(smol::run(quantum_1.next()), Some(42));
-}
-
-#[test]
-fn entangled() {
-    let name_1 = Name::random();
-    let name_2 = Name::random();
-
-    let mut quantum_1 = Quantum::<i32>::new(name_1);
-    let mut quantum_2 = Quantum::<i32>::new(name_2);
-
-    assert_eq!(quantum_1.name(), name_1);
-    assert_eq!(quantum_2.name(), name_2);
-
-    let tangle_1 = quantum_1.tangle();
-    let tangle_2 = quantum_2.tangle();
-
-    assert_eq!(tangle_1.name(), name_1);
-    assert_eq!(tangle_2.name(), name_2);
-
-    smol::run(quantum_1.entangle(tangle_2, Entanglement::Entangled));
-
-    quantum_1.exit(42);
-
-    assert_eq!(smol::run(quantum_2.next()), Some(42));
+    // > Error::Particle(oneshot canceled)
+    assert!(smol::block_on(p3).is_err());
+    // > Error::Entangled (p3 -> w2 && p1 <- w2)
+    assert!(smol::block_on(p1).is_err());
+    // > Error::Entangled (p3 -> w2)
+    assert!(smol::block_on(p2).is_err());
 }

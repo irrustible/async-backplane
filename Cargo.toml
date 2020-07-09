@@ -7,11 +7,10 @@ authors = ["James Laver <james.laver@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-event-listener = "2.0"
-futures = "0.3"
-intmap = "0.7"
-fastrand = "1.1"
-piper = "0.1"
+anyhow = "1.0"
+event-listener = "2.2"
+pin-project-lite = "0.1"
 
 [dev-dependencies]
+futures = "0.3"
 smol = "0.1"
