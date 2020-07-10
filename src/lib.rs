@@ -29,6 +29,13 @@ pin_project! {
     }
 }
 
+pin_project! {
+    struct ParticleTask<F> {
+        #[pin]
+        particle: Particle<F>,
+    }
+}
+
 pub struct Wave {
     inner: Arc<Inner>,
     listener: Option<EventListener>,
@@ -70,10 +77,12 @@ impl<F> Particle<F> {
         }
     }
 
-    pub fn entangle(&mut self, with: Wave) {
+    pub fn entangle(&mut self, with: Wave) -> &mut Self {
         if !Arc::ptr_eq(&self.inner, &with.inner) {
             self.entangled.insert(&*with.inner as *const _ as u64, with);
         }
+
+        self
     }
 
     #[cfg(debug_assertions)]
@@ -83,36 +92,93 @@ impl<F> Particle<F> {
 }
 
 #[cfg(feature = "smol")]
-impl<F, T, E> Particle<F>
-where
-    F: Future<Output = Result<T, E>> + 'static,
-    T: 'static,
-    E: Into<anyhow::Error>,
-{
-    pub fn spawn(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
+impl<F> Particle<F> {
+    pub fn spawn<E>(fut: F) -> Wave
     where
-        F: Send,
-        T: Send,
+        F: Future<Output = Result<(), E>> + Send + 'static,
+        E: Into<anyhow::Error>,
     {
         let particle = Particle::new(fut);
         let wave = particle.as_wave();
-        (Task::spawn(particle), wave)
+        Task::spawn(ParticleTask { particle }).detach();
+
+        wave
     }
 
-    pub fn spawn_blocking(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
+    pub fn spawn_blocking<E>(fut: F) -> Wave
     where
-        F: Send,
-        T: Send,
+        F: Future<Output = Result<(), E>> + Send + 'static,
+        E: Into<anyhow::Error>,
     {
         let particle = Particle::new(fut);
         let wave = particle.as_wave();
-        (Task::blocking(particle), wave)
+        Task::blocking(ParticleTask { particle }).detach();
+
+        wave
     }
 
-    pub fn spawn_local(fut: F) -> (Task<Result<Option<T>, Error>>, Wave) {
+    pub fn spawn_local<E>(fut: F) -> Wave
+    where
+        F: Future<Output = Result<(), E>> + 'static,
+        E: Into<anyhow::Error>,
+    {
         let particle = Particle::new(fut);
         let wave = particle.as_wave();
-        (Task::local(particle), wave)
+        Task::local(ParticleTask { particle }).detach();
+
+        wave
+    }
+}
+
+impl Wave {
+    pub fn cancel(&mut self) {
+        self.listener.take();
+        self.inner.succeeded();
+    }
+}
+
+#[cfg(feature = "smol")]
+impl Wave {
+    pub fn spawn<F, E>(&self, fut: F) -> Wave
+    where
+        F: Future<Output = Result<(), E>> + Send + 'static,
+        E: Into<anyhow::Error>,
+    {
+        let mut particle = Particle::new(fut);
+        let wave = particle.as_wave();
+
+        particle.entangle(self.clone());
+        Task::spawn(ParticleTask { particle }).detach();
+
+        wave
+    }
+
+    pub fn spawn_blocking<F, E>(&self, fut: F) -> Wave
+    where
+        F: Future<Output = Result<(), E>> + Send + 'static,
+        E: Into<anyhow::Error>,
+    {
+        let mut particle = Particle::new(fut);
+        let wave = particle.as_wave();
+
+        particle.entangle(self.clone());
+        Task::blocking(ParticleTask { particle }).detach();
+
+        wave
+    }
+
+    pub fn spawn_local<F, E>(&self, fut: F) -> Wave
+    where
+        F: Future<Output = Result<(), E>> + 'static,
+        E: Into<anyhow::Error>,
+    {
+        let mut particle = Particle::new(fut);
+        let wave = particle.as_wave();
+
+        particle.entangle(self.clone());
+        Task::local(ParticleTask { particle }).detach();
+
+        wave
     }
 }
 
@@ -300,6 +366,21 @@ where
                 self.failed();
                 Poll::Ready(Err(Error::Panic(err)))
             }
+        }
+    }
+}
+
+impl<F, T, E> Future for ParticleTask<F>
+where
+    F: Future<Output = Result<T, E>>,
+    E: Into<anyhow::Error>,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+        match self.project().particle.poll(ctx) {
+            Poll::Ready(_) => Poll::Ready(()),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
