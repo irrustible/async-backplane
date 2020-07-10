@@ -1,3 +1,5 @@
+mod catch_unwind; // Copied and tweaked from futures_util to avoid dependency on futures
+
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
