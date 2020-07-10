@@ -4,8 +4,8 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use event_listener::{Event, EventListener};
+use intmap::IntMap;
 use pin_project_lite::pin_project;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ pin_project! {
         #[pin]
         fut: F,
         inner: Arc<Inner>,
-        entangled: HashMap<*const Inner, Wave>,
+        entangled: IntMap<Wave>,
     }
 }
 
@@ -57,7 +57,7 @@ impl<F> Particle<F> {
                 status: AtomicU8::new(RUNNING),
                 event: Event::new(),
             }),
-            entangled: HashMap::new(),
+            entangled: IntMap::new(),
         }
     }
 
@@ -70,7 +70,7 @@ impl<F> Particle<F> {
 
     pub fn entangle(&mut self, with: Wave) {
         if !Arc::ptr_eq(&self.inner, &with.inner) {
-            self.entangled.insert(&*with.inner as _, with);
+            self.entangled.insert(&*with.inner as *const _ as u64, with);
         }
     }
 

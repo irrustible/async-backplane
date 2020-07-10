@@ -160,6 +160,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "intmap"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e50930385956f6c4a0b99f3dd654adcc40788456c36e17c5b20e1d1ceb523ec6"
+
+[[package]]
 name = "libc"
 version = "0.2.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -314,6 +320,7 @@ dependencies = [
  "anyhow",
  "event-listener",
  "futures",
+ "intmap",
  "pin-project-lite",
  "smol",
 ]

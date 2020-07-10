@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 anyhow = "1.0"
 event-listener = "2.2"
+intmap = "0.7"
 pin-project-lite = "0.1"
 
 [dev-dependencies]
