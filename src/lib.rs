@@ -82,26 +82,32 @@ impl<F> Particle<F> {
 
 #[cfg(feature="smol")]
 impl<F> Particle<F> {
-    pub fn spawn<T, E>(fut: F) -> Task<Result<Option<T>, Error>>
+    pub fn spawn<T, E>(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
     where
         F: 'static + Future<Output = Result<T, E>> + Send,
         E: Into<anyhow::Error>,
         T: 'static + Send {
-        Task::spawn(Particle::new(fut))
+        let particle = Particle::new(fut);
+        let wave = particle.as_wave();
+        (Task::spawn(particle), wave)
     }
-    pub fn spawn_blocking<T, E>(fut: F) -> Task<Result<Option<T>, Error>>
+    pub fn spawn_blocking<T, E>(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
     where
         F: 'static + Future<Output = Result<T, E>> + Send,
         E: Into<anyhow::Error>,
         T: 'static + Send {
-        Task::blocking(Particle::new(fut))
+        let particle = Particle::new(fut);
+        let wave = particle.as_wave();
+        (Task::blocking(particle), wave)
     }
-    pub fn spawn_local<T, E>(fut: F) -> Task<Result<Option<T>, Error>>
+    pub fn spawn_local<T, E>(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
     where
         F: 'static + Future<Output = Result<T, E>>,
         E: Into<anyhow::Error>,
         T: 'static {
-        Task::local(Particle::new(fut))
+        let particle = Particle::new(fut);
+        let wave = particle.as_wave();
+        (Task::local(particle), wave)
     }
 }
 
