@@ -4,6 +4,8 @@ use core::task::{Context, Poll};
 use event_listener::{Event, EventListener};
 use intmap::IntMap;
 use pin_project_lite::pin_project;
+use std::any::Any;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 #[cfg(feature="smol")]
@@ -34,9 +36,10 @@ pub struct Wave {
 
 #[derive(Debug)]
 pub enum Error {
-    Particle(anyhow::Error),
-    Wave,
-    Entangled,
+    Error(anyhow::Error),
+    Panic(Box<dyn Any + Send + 'static>),
+    ParticleFailure,
+    EntangledFailure,
 }
 
 struct Inner {
@@ -227,11 +230,11 @@ where
             SUCCEEDED | ENTANGLED_SUCCEEDED => return Poll::Ready(Ok(None)),
             FAILED => {
                 self.entangled_failed(false);
-                return Poll::Ready(Err(Error::Wave));
+                return Poll::Ready(Err(Error::ParticleFailure));
             }
             ENTANGLED_FAILED => {
                 self.entangled_failed(false);
-                return Poll::Ready(Err(Error::Entangled));
+                return Poll::Ready(Err(Error::EntangledFailure));
             }
             _ => (),
         }
@@ -257,26 +260,30 @@ where
                 if self.entangled_succeeded(true) {
                     return Poll::Ready(Ok(None));
                 } else {
-                    return Poll::Ready(Err(Error::Entangled));
+                    return Poll::Ready(Err(Error::EntangledFailure));
                 }
             },
             FAILED => {
                 self.entangled_failed(true);
-                return Poll::Ready(Err(Error::Entangled));
+                return Poll::Ready(Err(Error::EntangledFailure));
             }
             _ => (),
         }
 
         // Otherwise, poll the inner future and eventually update statuses.
-        match this.fut.poll(ctx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(ok)) => {
+        match catch_unwind(AssertUnwindSafe(|| this.fut.poll(ctx))) {
+            Ok(Poll::Pending) => Poll::Pending,
+            Ok(Poll::Ready(Ok(ok))) => {
                 self.succeeded();
                 Poll::Ready(Ok(Some(ok)))
             }
-            Poll::Ready(Err(err)) => {
+            Ok(Poll::Ready(Err(err))) => {
                 self.failed();
-                Poll::Ready(Err(Error::Particle(err.into())))
+                Poll::Ready(Err(Error::Error(err.into())))
+            }
+            Err(err) => {
+                self.failed();
+                Poll::Ready(Err(Error::Panic(err)))
             }
         }
     }
@@ -294,8 +301,8 @@ impl Future for Wave {
             let listener = self.inner.event.listen();
             match self.inner.status.load(Ordering::SeqCst) {
                 SUCCEEDED | ENTANGLED_SUCCEEDED => return Poll::Ready(Ok(())),
-                FAILED => return Poll::Ready(Err(Error::Wave)),
-                ENTANGLED_FAILED => return Poll::Ready(Err(Error::Entangled)),
+                FAILED => return Poll::Ready(Err(Error::ParticleFailure)),
+                ENTANGLED_FAILED => return Poll::Ready(Err(Error::EntangledFailure)),
                 _ => listener,
             }
         };
@@ -303,8 +310,8 @@ impl Future for Wave {
         if Pin::new(&mut listener).poll(ctx).is_ready() {
             match self.inner.status.load(Ordering::SeqCst) {
                 SUCCEEDED | ENTANGLED_SUCCEEDED => Poll::Ready(Ok(())),
-                FAILED => Poll::Ready(Err(Error::Wave)),
-                ENTANGLED_FAILED => Poll::Ready(Err(Error::Entangled)),
+                FAILED => Poll::Ready(Err(Error::ParticleFailure)),
+                ENTANGLED_FAILED => Poll::Ready(Err(Error::EntangledFailure)),
                 _ => unreachable!(),
             }
         } else {
