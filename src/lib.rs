@@ -1,5 +1,3 @@
-mod catch_unwind; // Copied and tweaked from futures_util to avoid dependency on futures
-
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -8,6 +6,8 @@ use intmap::IntMap;
 use pin_project_lite::pin_project;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+#[cfg(feature="smol")]
+use smol::Task;
 
 // RUNNING -> ENTANGLED_SUCCEEDED -> ENTANGLED_FAILED -> SUCCEEDED -> FAILED
 const RUNNING: u8 = 0;
@@ -77,6 +77,31 @@ impl<F> Particle<F> {
     #[cfg(debug_assertions)]
     pub fn status(&self) -> u8 {
         self.inner.status.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(feature="smol")]
+impl<F> Particle<F> {
+    pub fn spawn<T, E>(fut: F) -> Task<Result<Option<T>, Error>>
+    where
+        F: 'static + Future<Output = Result<T, E>> + Send,
+        E: Into<anyhow::Error>,
+        T: 'static + Send {
+        Task::spawn(Particle::new(fut))
+    }
+    pub fn spawn_blocking<T, E>(fut: F) -> Task<Result<Option<T>, Error>>
+    where
+        F: 'static + Future<Output = Result<T, E>> + Send,
+        E: Into<anyhow::Error>,
+        T: 'static + Send {
+        Task::blocking(Particle::new(fut))
+    }
+    pub fn spawn_local<T, E>(fut: F) -> Task<Result<Option<T>, Error>>
+    where
+        F: 'static + Future<Output = Result<T, E>>,
+        E: Into<anyhow::Error>,
+        T: 'static {
+        Task::local(Particle::new(fut))
     }
 }
 
