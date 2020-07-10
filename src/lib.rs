@@ -4,12 +4,12 @@ use core::task::{Context, Poll};
 use event_listener::{Event, EventListener};
 use intmap::IntMap;
 use pin_project_lite::pin_project;
+#[cfg(feature = "smol")]
+use smol::Task;
 use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
-#[cfg(feature="smol")]
-use smol::Task;
 
 // RUNNING -> ENTANGLED_SUCCEEDED -> ENTANGLED_FAILED -> SUCCEEDED -> FAILED
 const RUNNING: u8 = 0;
@@ -47,7 +47,6 @@ struct Inner {
     event: Event,
 }
 
-
 impl<F> Particle<F> {
     pub fn new<T, E>(fut: F) -> Self
     where
@@ -83,31 +82,34 @@ impl<F> Particle<F> {
     }
 }
 
-#[cfg(feature="smol")]
-impl<F> Particle<F> {
-    pub fn spawn<T, E>(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
+#[cfg(feature = "smol")]
+impl<F, T, E> Particle<F>
+where
+    F: Future<Output = Result<T, E>> + 'static,
+    T: 'static,
+    E: Into<anyhow::Error>,
+{
+    pub fn spawn(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
     where
-        F: 'static + Future<Output = Result<T, E>> + Send,
-        E: Into<anyhow::Error>,
-        T: 'static + Send {
+        F: Send,
+        T: Send,
+    {
         let particle = Particle::new(fut);
         let wave = particle.as_wave();
         (Task::spawn(particle), wave)
     }
-    pub fn spawn_blocking<T, E>(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
+
+    pub fn spawn_blocking(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
     where
-        F: 'static + Future<Output = Result<T, E>> + Send,
-        E: Into<anyhow::Error>,
-        T: 'static + Send {
+        F: Send,
+        T: Send,
+    {
         let particle = Particle::new(fut);
         let wave = particle.as_wave();
         (Task::blocking(particle), wave)
     }
-    pub fn spawn_local<T, E>(fut: F) -> (Task<Result<Option<T>, Error>>, Wave)
-    where
-        F: 'static + Future<Output = Result<T, E>>,
-        E: Into<anyhow::Error>,
-        T: 'static {
+
+    pub fn spawn_local(fut: F) -> (Task<Result<Option<T>, Error>>, Wave) {
         let particle = Particle::new(fut);
         let wave = particle.as_wave();
         (Task::local(particle), wave)
@@ -167,7 +169,12 @@ impl Inner {
         let mut status = RUNNING;
         loop {
             // [...] -> SUCCEEDED -> FAILED
-            match self.status.compare_exchange_weak(status, SUCCEEDED, Ordering::SeqCst, Ordering::SeqCst) {
+            match self.status.compare_exchange_weak(
+                status,
+                SUCCEEDED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
                 Ok(RUNNING) => {
                     self.event.notify(!0);
                     break;
@@ -189,7 +196,10 @@ impl Inner {
     // if it is equal to `ENTANGLED_FAILED` or `FAILED`.
     fn entangled_succeeded(&self) -> bool {
         // RUNNING -> ENTANGLED_SUCCEEDED -> [...]
-        match self.status.compare_and_swap(RUNNING, ENTANGLED_SUCCEEDED, Ordering::SeqCst) {
+        match self
+            .status
+            .compare_and_swap(RUNNING, ENTANGLED_SUCCEEDED, Ordering::SeqCst)
+        {
             RUNNING => {
                 self.event.notify(!0);
                 true
@@ -203,7 +213,12 @@ impl Inner {
         let mut status = RUNNING;
         loop {
             // [...] -> ENTANGLED_FAILED -> SUCCEEDED -> FAILED
-            match self.status.compare_exchange_weak(status, ENTANGLED_FAILED, Ordering::SeqCst, Ordering::SeqCst) {
+            match self.status.compare_exchange_weak(
+                status,
+                ENTANGLED_FAILED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
                 Ok(RUNNING) => {
                     self.event.notify(!0);
                     break;
@@ -262,7 +277,7 @@ where
                 } else {
                     return Poll::Ready(Err(Error::EntangledFailure));
                 }
-            },
+            }
             FAILED => {
                 self.entangled_failed(true);
                 return Poll::Ready(Err(Error::EntangledFailure));
