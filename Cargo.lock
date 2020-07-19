@@ -18,6 +18,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c17772156ef2829aadc587461c7753af20b7e8db1529bc66855add962a3b35d3"
 
 [[package]]
+name = "atomic_prim_traits"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd0aa75c6563140ef108b408c68abd7bfc6f9fe45193b75e9f50dbad536b3e8d"
+
+[[package]]
 name = "blocking"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -177,6 +183,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9f8082297d534141b30c8d39e9b1773713ab50fdbe4ff30f750d063b3bfd701"
 
 [[package]]
+name = "maybe-unwind"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f8f264861cca5d0943a472622980bf8624cc7ec2087a3c8d26b837ae92613cd"
+dependencies = [
+ "futures-core",
+]
+
+[[package]]
 name = "memchr"
 version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -215,16 +230,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "pin-project-lite"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "282adbf10f2698a7a77f8e983a74b2d18176c19a7fd32a45446139ae7b02b715"
-
-[[package]]
 name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "primitive_traits"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff1fce8f7e64aa6d866737c60f38b47dfc5863303bf7e2f68748db118d820eb3"
 
 [[package]]
 name = "proc-macro-hack"
@@ -263,10 +278,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2439c63f3f6139d1b57529d16bc3b8bb855230c8efcc5d3a896c8bea7c3b1e84"
 
 [[package]]
+name = "rw_lease"
+version = "0.1.0"
+source = "git+https://github.com/irrustible/rw_lease?branch=main#73e491e44ff1022be4a09ba56ca55535d00957b4"
+dependencies = [
+ "atomic_prim_traits",
+ "event-listener",
+ "primitive_traits",
+ "simple-mutex",
+]
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6a9290e3c9cf0f18145ef7ffa62d68ee0bf5fcd651017e586dc7fd5da448c2"
+
+[[package]]
+name = "simple-mutex"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38aabbeafa6f6dead8cebf246fe9fae1f9215c8d29b3a69f93bd62a9e4a3dcd6"
+dependencies = [
+ "event-listener",
+]
 
 [[package]]
 name = "slab"
@@ -327,7 +362,8 @@ dependencies = [
  "futures",
  "futures-core",
  "intmap",
- "pin-project-lite",
+ "maybe-unwind",
+ "rw_lease",
  "smol",
 ]
 

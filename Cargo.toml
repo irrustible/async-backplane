@@ -10,11 +10,17 @@ edition = "2018"
 default = ["smol"]
 
 [dependencies]
-async-channel="1.1.1"
-concurrent-queue="1.1.1"
+async-channel = "1.1"
+concurrent-queue = "1.1"
 futures-core = "0.3"
 intmap = "0.7"
-pin-project-lite = "0.1"
+maybe-unwind = "0.3"
+
+[dependencies.rw_lease]
+# path = "../rw_lease"
+git = "https://github.com/irrustible/rw_lease"
+branch = "main"
+# version = "0.1"
 
 [dependencies.smol]
 version = "0.1"

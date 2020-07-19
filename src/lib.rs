@@ -1,602 +1,324 @@
-// use event_listener::{Event, EventListener};
-// use intmap::IntMap;
-use pin_project_lite::pin_project;
-// #[cfg(feature = "smol")]
-// use smol::Task;
-use std::any::Any;
-// use std::convert::TryInto;
 use std::future::Future;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::sync::{Arc, Mutex};
-use async_channel::{Sender, Receiver};
+use std::sync::Arc;
+use async_channel::Receiver;
 use futures_core::stream::Stream;
+use maybe_unwind::{capture_panic_info, maybe_unwind, Unwind};
+use std::panic;
 
-/// A Particle ID
+mod plugboard;
+use plugboard::Plugboard;
+
+/// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct Pid {
-    inner: u64,
+pub struct DeviceID {
+    pub(crate) inner: usize,
 }
 
-/// Status of a process's termination
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Measurement {
-    /// The task completed successfully
-    Success,
-    /// There was an error running the task
-    Error,
-    /// A partner task errored
-    Cascade(Pid),
+impl DeviceID {
+    pub(crate) fn new(inner: usize) -> DeviceID {
+        DeviceID { inner }
+    }
 }
 
-/// The reason a process failed
+pub trait Pluggable {
+    fn device_id(&self) -> DeviceID;
+    /// Ask to be notified when the provided Line disconnects
+    fn monitor(&self, line: Line) -> Result<(), LinkError>;
+    /// Ask to not be notified when the provided Line disconnects
+    fn demonitor(&self, line: &Line) -> Result<(), LinkError>;
+    /// Notify the provided Line when we disconnect
+    fn attach(&self, line: Line) -> Result<(), LinkError>;
+    /// Undo attach
+    fn detach(&self, device_id: DeviceID) -> Result<(), LinkError>;
+    /// Monitor + attach
+    fn link(&self, line: Line) -> Result<(), LinkError>;
+    /// Undo link
+    fn unlink(&self, line: &Line) -> Result<(), LinkError>;
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum LinkError {
+    DeviceDown,
+    LinkDown,
+}
+
+/// The device has dropped off the bus
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum Disconnect {
+    Complete,
+    Crash,
+    /// A device we depended on errored
+    Cascade(DeviceID),
+}
+
+/// Something went wrong with a Device
 #[derive(Debug)]
-pub enum Error {
-    Panic(Box<dyn Any + Send + 'static>),
-    Failure(Box<dyn Any + Send + 'static>),
-    Cascade(Pid),
+pub enum Crash<C> {
+    Panic(Unwind),
+    Fail(C),
+    Cascade(DeviceID),
 }
 
-pub type Exit = (Pid, Measurement);
 
-pub type Crash = (Pid, Error);
+pub struct Supervised<F: Future> {
+    fut: F,
+    device: Option<Device>,
+}
 
-// struct Supervisor {
-//     tangle: Arc<Tangle>,
+impl<F, C, T> Future for Supervised<F>
+where F: Future<Output=Result<T, C>> {
+    type Output = Result<T, Crash<C>>;
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        if let Some(ref mut device) = &mut this.device {
+            loop {
+                match Device::poll_next(Pin::new(device), ctx) {
+                    Poll::Ready(Some((id, disconnect))) => {
+                        match disconnect {
+                            Disconnect::Crash => {
+                                let disco = Disconnect::Cascade(device.device_id());
+                                device.plugboard.broadcast(device.device_id(), disco);
+                                return Poll::Ready(Err(Crash::Cascade(id)));
+                            }
+                            Disconnect::Cascade(from) => {
+                                device.plugboard.broadcast(device.device_id(), disconnect);
+                                return Poll::Ready(Err(Crash::Cascade(from)));
+                            }
+                            _ => () // spin
+                        }
+                    }
+                    Poll::Pending => {
+                        let fut = unsafe { Pin::new_unchecked(&mut this.fut) };
+                        return match maybe_unwind(AssertUnwindSafe(|| fut.poll(ctx))) {
+                            Ok(Poll::Pending) => Poll::Pending,
+                            Ok(Poll::Ready(Ok(val))) => {
+                                device.plugboard.broadcast(device.device_id(), Disconnect::Complete);
+                                return Poll::Ready(Ok(val))
+                            }
+                            Ok(Poll::Ready(Err(val))) => {
+                                device.plugboard.broadcast(device.device_id(), Disconnect::Crash);
+                                return Poll::Ready(Err(Crash::Fail(val.into())))
+                            }
+                            Err(unwind) => {
+                                device.plugboard.broadcast(device.device_id(), Disconnect::Crash);
+                                return Poll::Ready(Err(Crash::Panic(unwind)));
+                            }
+                        }
+                    }
+                    Poll::Ready(None) => { return Poll::Pending; } // shouldn't happen
+                }
+            }
+        }
+        Poll::Pending
+    }
+}
+
+// #[cfg(feature = "smol")]
+// impl<F> Device<F> {
+//     pub fn spawn<E>(fut: F) -> Line
+//     where
+//         F: Future<Output = Result<(), E>> + Send + 'static,
+//         E: Into<anyhow::Error>,
+//     {
+//         let device = Device::new(fut);
+//         let line = device.as_line();
+//         Task::spawn(DeviceTask { device }).detach();
+
+//         line
+//     }
+
+            //     pub fn spawn_blocking<E>(fut: F) -> Line
+//     where
+//         F: Future<Output = Result<(), E>> + Send + 'static,
+//         E: Into<anyhow::Error>,
+//     {
+//         let device = Device::new(fut);
+//         let line = device.as_line();
+//         Task::blocking(DeviceTask { device }).detach();
+
+//         line
+//     }
+
+//     pub fn spawn_local<E>(fut: F) -> Line
+//     where
+//         F: Future<Output = Result<(), E>> + 'static,
+//         E: Into<anyhow::Error>,
+//     {
+//         let device = Device::new(fut);
+//         let line = device.as_line();
+//         Task::local(DeviceTask { device }).detach();
+
+//         line
+//     }
 // }
 
-// A particle may listen for the status of another particle
+// #[cfg(feature = "smol")]
+// impl Line {
+//     pub fn spawn<F, E>(&self, fut: F) -> Line
+//     where
+//         F: Future<Output = Result<(), E>> + Send + 'static,
+//         E: Into<anyhow::Error>,
+//     {
+//         let mut device = Device::new(fut);
+//         let line = device.as_line();
 
-/// A Particle is an error domain for a computation. Through
-/// entanglement, it can become aware of the completion (and status)
-/// of computations connected to other Particles and react accordingly.
-    
-pub struct Particle {
-    exits: Receiver<Exit>,
-    inner: Arc<Particulate>,
+//         device.entangle(self.clone());
+//         Task::spawn(DeviceTask { device }).detach();
+
+//         line
+//     }
+
+//     pub fn spawn_blocking<F, E>(&self, fut: F) -> Line
+//     where
+//         F: Future<Output = Result<(), E>> + Send + 'static,
+//         E: Into<anyhow::Error>,
+//     {
+//         let mut device = Device::new(fut);
+//         let line = device.as_line();
+
+//         device.entangle(self.clone());
+//         Task::blocking(DeviceTask { device }).detach();
+
+//         line
+//     }
+
+//     pub fn spawn_local<F, E>(&self, fut: F) -> Line
+//     where
+//         F: Future<Output = Result<(), E>> + 'static,
+//         E: Into<anyhow::Error>,
+//     {
+//         let mut device = Device::new(fut);
+//         let line = device.as_line();
+
+//         device.entangle(self.clone());
+//         Task::local(DeviceTask { device }).detach();
+
+//         line
+//     }
+// }
+
+/// A Device is a computation's connection to the backplane
+pub struct Device {
+    disconnects: Receiver<(DeviceID, Disconnect)>,
+    plugboard: Arc<Plugboard>,
 }
 
-impl Particle {
+impl Device {
     pub fn new() -> Self {
-        let (send, exits) = async_channel::unbounded();
-        let inner = Arc::new(Particulate::new(send));
-        Particle { exits, inner }
+        let (send, disconnects) = async_channel::unbounded();
+        let plugboard = Arc::new(Plugboard::new(send));
+        Device { disconnects, plugboard }
     }
 
-    pub fn pid(&self) -> Pid {
-        Pid { inner: &*self.inner as *const _ as u64 }
+    // pub fn new_monitored(by: Line) -> Self {
+    //     let (send, disconnects) = async_channel::unbounded();
+    //     let plugboard = Arc::new(Plugboard::new(send));
+    //     Device { disconnects, plugboard }
+    // }
+
+    pub fn open_line(&self) -> Line {
+        Line { plugboard: self.plugboard.clone() }
     }
 
-    pub fn exit(self, measurement: Measurement) {
-        self.inner.notify((self.pid(), measurement)).unwrap();
-    }
-
-    pub fn monitor(&self, who: Boson) -> bool {
-        who.inner.add_monitor(Boson::new(self))
-    }
-
-    pub fn demonitor(&self, who: Boson) -> bool {
-        who.inner.remove_monitor(self.pid())
-    }
-
-    pub fn add_monitor(&self, who: Boson) -> bool {
-        self.inner.add_monitor(who)
-    }
-
-    pub fn remove_monitor(&self, who: Boson) -> bool {
-        self.inner.remove_monitor(who.pid())
-    }
-
-    pub fn entangle(&self, with: Boson) {
-        self.monitor(with.clone());
-        self.add_monitor(with);
+    pub fn disconnect(self, disconnect: Disconnect) {
+        self.plugboard.broadcast(self.device_id(), disconnect);
     }
 }
 
-impl Unpin for Particle {}
+impl Unpin for Device {}
 
-impl Stream for Particle {
-    type Item = Exit;
-    fn poll_next(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Option<Exit>> {
-        Receiver::poll_next(Pin::new(&mut Pin::into_inner(self).exits), ctx)
+impl Pluggable for Device {
+    fn device_id(&self) -> DeviceID {
+        DeviceID::new(&*self.plugboard as *const _ as usize)
+    }
+    fn monitor(&self, line: Line) -> Result<(), LinkError> {
+        line.plugboard.attach(self.open_line(), LinkError::LinkDown)
+    }
+    fn demonitor(&self, line: &Line) -> Result<(), LinkError> {
+        line.plugboard.detach(self.device_id(), LinkError::LinkDown)
+    }
+    fn attach(&self, line: Line) -> Result<(), LinkError> {
+        self.plugboard.attach(line, LinkError::DeviceDown)
+    }
+    fn detach(&self, did: DeviceID) -> Result<(), LinkError> {
+        self.plugboard.detach(did, LinkError::DeviceDown)
+    }
+    fn link(&self, line: Line) -> Result<(), LinkError> {
+        self.monitor(line.clone())?;
+        self.attach(line)?;
+        Ok(())
+    }
+    fn unlink(&self, line: &Line) -> Result<(), LinkError> {
+        self.detach(line.device_id())?;
+        self.demonitor(line)?;
+        Ok(())
+    }
+}
+
+impl Stream for Device {
+    type Item = (DeviceID, Disconnect);
+    fn poll_next(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Option<Self::Item>> {
+        Receiver::poll_next(Pin::new(&mut Pin::into_inner(self).disconnects), ctx)
     }
 }
 
 #[derive(Clone)]
-pub struct Boson {
-    inner: Arc<Particulate>,
+pub struct Line {
+    pub(crate) plugboard: Arc<Plugboard>,
 }
 
-impl Boson {
-    pub fn new(particle: &Particle) -> Self {
-        Boson { inner: particle.inner.clone() }
-    }
+impl Eq for Line {}
 
-    pub fn pid(&self) -> Pid {
-        Pid { inner: &*self.inner as *const _ as u64 }
-    }
+impl Unpin for Line {}
 
-    pub fn monitor(&self, to: Boson) -> bool {
-        to.inner.add_monitor(self.clone())
-    }
-
-    pub fn add_monitor(&self, who: Boson) -> bool {
-        self.inner.add_monitor(who)
-    }
-
-    pub fn entangle(&self, with: Boson) {
-        self.monitor(with.clone());
-        self.add_monitor(with);
-    }
-
-    pub fn notify(&self, exit: Exit) -> Result<(), ()> {
-        self.inner.notify(exit)
+impl PartialEq for Line {
+    fn eq(&self, other: &Line) -> bool {
+        Arc::ptr_eq(&self.plugboard, &other.plugboard)
     }
 }
 
-impl PartialEq for Boson {
-    fn eq(&self, other: &Boson) -> bool {
-        self.pid() == other.pid()
+impl Pluggable for Line {
+    fn device_id(&self) -> DeviceID {
+        DeviceID::new(&*self.plugboard as *const _ as usize)
+    }
+    fn monitor(&self, line: Line) -> Result<(), LinkError> {
+        line.plugboard.attach(self.clone(), LinkError::LinkDown)
+    }
+    fn demonitor(&self, line: &Line) -> Result<(), LinkError> {
+        line.plugboard.detach(self.device_id(), LinkError::LinkDown)
+    }
+    fn attach(&self, line: Line) -> Result<(), LinkError> {
+        self.plugboard.attach(line, LinkError::DeviceDown)
+    }
+    fn detach(&self, did: DeviceID) -> Result<(), LinkError> {
+        self.plugboard.detach(did, LinkError::DeviceDown)
+    }
+    fn link(&self, line: Line) -> Result<(), LinkError> {
+        self.monitor(line.clone())?;
+        self.attach(line)?;
+        Ok(())
+    }
+    fn unlink(&self, line: &Line) -> Result<(), LinkError> {
+        self.detach(line.device_id())?;
+        self.demonitor(line)?;
+        Ok(())
     }
 }
 
-impl Eq for Boson {}
-
-struct Particulate {
-    me: Sender<Exit>,
-    bosons: Mutex<Bosons>,
+/// Sets the thread local panic handler to record the unwind information
+pub fn replace_panic_hook() {
+    panic::set_hook(Box::new(|info| { capture_panic_info(info); }));
 }
 
-impl Particulate {
-    fn new(me: Sender<Exit>) -> Self {
-        let bosons = Mutex::new(Bosons::new());
-        Particulate { me, bosons }
-    }
-    fn add_monitor(&self, boson: Boson) -> bool {
-        self.bosons.lock().unwrap().add(boson)
-    }
-    fn remove_monitor(&self, pid: Pid) -> bool {
-        self.bosons.lock().unwrap().remove(pid)
-    }
-    fn broadcast(&self, exit: Exit) {
-        self.bosons.lock().unwrap().notify(exit)
-    }
-    fn notify(&self, exit: Exit) -> Result<(), ()> {
-        self.me.try_send(exit).map_err(|_| ())
-    }
+/// Sets the thread local panic handler to record the unwind information
+/// and then execute whichever other hook was already in place
+pub fn chain_panic_hook() {
+    let old = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        capture_panic_info(info);
+        old(info);
+    }));
 }
-
-struct Bosons {
-    inner: Vec<Option<Boson>>,
-}
-
-impl Bosons {
-    fn new() -> Self {
-        Bosons { inner: Vec::new() }
-    }
-    fn add(&mut self, boson: Boson) -> bool {
-        for option in &self.inner {
-            if let Some(boson2) = option {
-                if boson2 == &boson {
-                    return false;
-                }
-            }
-        }
-        self.inner.push(Some(boson));
-        true
-    }
-    fn remove(&mut self, pid: Pid) -> bool {
-        for b in &mut self.inner {
-            if let Some(boson) = b {
-                if boson.pid() == pid {
-                    b.take();
-                    return true;
-                }
-            }                
-        }
-        false
-    }
-    fn notify(&mut self, exit: Exit) {
-        for b in &mut self.inner {
-            if let Some(boson) = b {
-                boson.notify(exit.clone()).unwrap();
-            }
-        }
-    }
-}
-
-pin_project! {
-   pub struct Supervised<F> {
-       #[pin]
-       fut: F,
-       particle: Option<Particle>,
-       error: Sender<Error>,
-   }
-}
-
-// impl<F, T> Supervised<F>
-// where F: Future<Output=Result<(), T>>,
-//       T: Into<Error> {
-//     fn report_error(&mut self, error: Error) -> Result<(), ()> {
-//         self.error.try_send(error).map_err(|_| ())
-//     }
-//     fn report_exit(particle: Particle, measurement: Measurement) {
-//         particle.exit(measurement)
-//     }
-//     // fn check_exit(particle: &mut Particle, pid: Pid, measurement: Measurement) -> Poll<()> {
-//     //     if measurement != Measurement::Success {
-//     //         particle.exit(Measurement::Cascade(pid));
-//     //         Poll::Ready(())
-//     //     } else {
-//     //         Poll::Pending
-//     //     }
-//     // }
-//     // fn poll_future(fut: Pin<&mut F>
-// }
-
-// impl<F, T> Future for Supervised<F>
-// where F: Future<Output=Result<(), T>>,
-//       T: Into<Error> {
-//     type Output=();
-//     fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<()> {
-//         let this = self.project();
-//         match this.particle.poll_next(this.particle, ctx) {
-//             Poll::Ready(None) => Poll::Ready(()),
-//             Poll::Ready(Some((pid, measurement))) =>
-//                 Supervised::on_particle_some(&mut this.particle, pid, measurement),
-
-//             Poll::Pending => {
-//                 match catch_unwind(AssertUnwindSafe(|| this.fut.poll(ctx))) {
-                    
-//         //     Ok(Poll::Pending) => Poll::Pending,
-//         //     Ok(Poll::Ready((ok))) => {
-//         //         self.particle.broadcast(Measurement::Success)
-//         //         Poll::Ready(())
-//         //     }
-//         //     Ok(Poll::Ready(Err(err))) => {
-//         //         self.failed();
-//         //         Poll::Ready(Err(Error::Error(err.into())))
-//         //     }
-//         //     Err(err) => {
-//         //         self.particle.broadcast(Measurement::Error);
-//         //         Poll::Ready(Err(Error::Panic(err)))
-//         //     }
-//         // }
-//     }
-// }
-
-// #[cfg(feature = "smol")]
-// impl<F> Particle<F> {
-//     pub fn spawn<E>(fut: F) -> Wave
-//     where
-//         F: Future<Output = Result<(), E>> + Send + 'static,
-//         E: Into<anyhow::Error>,
-//     {
-//         let particle = Particle::new(fut);
-//         let wave = particle.as_wave();
-//         Task::spawn(ParticleTask { particle }).detach();
-
-//         wave
-//     }
-
-            //     pub fn spawn_blocking<E>(fut: F) -> Wave
-//     where
-//         F: Future<Output = Result<(), E>> + Send + 'static,
-//         E: Into<anyhow::Error>,
-//     {
-//         let particle = Particle::new(fut);
-//         let wave = particle.as_wave();
-//         Task::blocking(ParticleTask { particle }).detach();
-
-//         wave
-//     }
-
-//     pub fn spawn_local<E>(fut: F) -> Wave
-//     where
-//         F: Future<Output = Result<(), E>> + 'static,
-//         E: Into<anyhow::Error>,
-//     {
-//         let particle = Particle::new(fut);
-//         let wave = particle.as_wave();
-//         Task::local(ParticleTask { particle }).detach();
-
-//         wave
-//     }
-// }
-
-// impl Wave {
-//     pub fn cancel(&mut self) {
-//         self.listener.take();
-//         self.inner.succeeded();
-//     }
-// }
-
-// #[cfg(feature = "smol")]
-// impl Wave {
-//     pub fn spawn<F, E>(&self, fut: F) -> Wave
-//     where
-//         F: Future<Output = Result<(), E>> + Send + 'static,
-//         E: Into<anyhow::Error>,
-//     {
-//         let mut particle = Particle::new(fut);
-//         let wave = particle.as_wave();
-
-//         particle.entangle(self.clone());
-//         Task::spawn(ParticleTask { particle }).detach();
-
-//         wave
-//     }
-
-//     pub fn spawn_blocking<F, E>(&self, fut: F) -> Wave
-//     where
-//         F: Future<Output = Result<(), E>> + Send + 'static,
-//         E: Into<anyhow::Error>,
-//     {
-//         let mut particle = Particle::new(fut);
-//         let wave = particle.as_wave();
-
-//         particle.entangle(self.clone());
-//         Task::blocking(ParticleTask { particle }).detach();
-
-//         wave
-//     }
-
-//     pub fn spawn_local<F, E>(&self, fut: F) -> Wave
-//     where
-//         F: Future<Output = Result<(), E>> + 'static,
-//         E: Into<anyhow::Error>,
-//     {
-//         let mut particle = Particle::new(fut);
-//         let wave = particle.as_wave();
-
-//         particle.entangle(self.clone());
-//         Task::local(ParticleTask { particle }).detach();
-
-//         wave
-//     }
-// }
-
-// impl<F> Particle<F> {
-//     fn succeeded(self: Pin<&mut Self>) {
-//         self.inner.succeeded();
-//         self.entangled_succeeded(false);
-//     }
-
-//     fn failed(self: Pin<&mut Self>) {
-//         self.inner.failed();
-//         self.entangled_failed(false);
-//     }
-
-//     // Returns `true` if the new status of the particle and its entangled waves is equal to
-//     // `ENTANGLED_SUCCEEDED` or `SUCCEEDED`, or `false` if it is equal to `ENTANGLED_FAILED` or
-//     // `FAILED`.
-//     fn entangled_succeeded(mut self: Pin<&mut Self>, inner: bool) -> bool {
-//         if inner && !self.inner.entangled_succeeded() {
-//             self.entangled_failed(false);
-//             return false;
-//         }
-
-//         let mut failed = false;
-//         for wave in self.as_mut().project().entangled.values_mut() {
-//             if !wave.inner.entangled_succeeded() {
-//                 failed = true;
-//                 break;
-//             }
-//         }
-
-//         if failed {
-//             self.entangled_failed(false);
-//             false
-//         } else {
-//             self.project().entangled.clear();
-//             true
-//         }
-//     }
-
-//     fn entangled_failed(self: Pin<&mut Self>, inner: bool) {
-//         if inner {
-//             self.inner.entangled_failed();
-//         }
-
-//         for (_, wave) in self.project().entangled.drain() {
-//             wave.inner.entangled_failed();
-//         }
-//     }
-// }
-
-// impl Inner {
-//     fn succeeded(&self) {
-//         let mut status = RUNNING;
-//         loop {
-//             // [...] -> SUCCEEDED -> FAILED
-//             match self.status.compare_exchange_weak(
-//                 status,
-//                 SUCCEEDED,
-//                 Ordering::SeqCst,
-//                 Ordering::SeqCst,
-//             ) {
-//                 Ok(RUNNING) => {
-//                     self.event.notify(!0);
-//                     break;
-//                 }
-//                 Ok(_) | Err(FAILED) | Err(SUCCEEDED) => break,
-//                 Err(cur) => status = cur,
-//             }
-//         }
-//     }
-
-//     fn failed(&self) {
-//         // [...] -> FAILED
-//         if self.status.swap(FAILED, Ordering::SeqCst) == RUNNING {
-//             self.event.notify(!0);
-//         }
-//     }
-
-//     // Returns `true` if the new status is equal to `ENTANGLED_SUCCEEDED` or `SUCCEEDED`, or `false`
-//     // if it is equal to `ENTANGLED_FAILED` or `FAILED`.
-//     fn entangled_succeeded(&self) -> bool {
-//         // RUNNING -> ENTANGLED_SUCCEEDED -> [...]
-//         match self
-//             .status
-//             .compare_and_swap(RUNNING, ENTANGLED_SUCCEEDED, Ordering::SeqCst)
-//         {
-//             RUNNING => {
-//                 self.event.notify(!0);
-//                 true
-//             }
-//             FAILED | ENTANGLED_FAILED => false,
-//             _ => true,
-//         }
-//     }
-
-//     fn entangled_failed(&self) {
-//         let mut status = RUNNING;
-//         loop {
-//             // [...] -> ENTANGLED_FAILED -> SUCCEEDED -> FAILED
-//             match self.status.compare_exchange_weak(
-//                 status,
-//                 ENTANGLED_FAILED,
-//                 Ordering::SeqCst,
-//                 Ordering::SeqCst,
-//             ) {
-//                 Ok(RUNNING) => {
-//                     self.event.notify(!0);
-//                     break;
-//                 }
-//                 Ok(_) | Err(ENTANGLED_FAILED) | Err(SUCCEEDED) | Err(FAILED) => break,
-//                 Err(cur) => status = cur,
-//             }
-//         }
-//     }
-// }
-
-// impl<F, T, E> Future for Particle<F>
-// where
-//     F: Future<Output = Result<T, E>>,
-//     E: Into<anyhow::Error>,
-// {
-//     type Output = Result<Option<T>, Error>;
-
-//     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-//         let this = self.as_mut().project();
-
-//         // Check the particle's current state and eventually propagate it to its entangled waves.
-//         match this.inner.status.load(Ordering::SeqCst) {
-//             SUCCEEDED | ENTANGLED_SUCCEEDED => return Poll::Ready(Ok(None)),
-//             FAILED => {
-//                 self.entangled_failed(false);
-//                 return Poll::Ready(Err(Error::ParticleFailure));
-//             }
-//             ENTANGLED_FAILED => {
-//                 self.entangled_failed(false);
-//                 return Poll::Ready(Err(Error::EntangledFailure));
-//             }
-//             _ => (),
-//         }
-
-//         // Check for entangled waves whose status is `SUCCEEDED` or `ENTANGLED_SUCCEEDED` and stop
-//         // when finding one whose status is `FAILED` or `ENTANGLED_FAILED`.
-//         let mut status = RUNNING;
-//         for mut wave in this.entangled.values_mut() {
-//             match Pin::new(&mut wave).poll(ctx) {
-//                 Poll::Ready(Ok(())) => status = SUCCEEDED,
-//                 Poll::Ready(Err(_)) => {
-//                     status = FAILED;
-//                     break;
-//                 }
-//                 Poll::Pending => (),
-//             }
-//         }
-
-//         // If at least one entangled wave's status wasn't `RUNNING`, update the status of the
-//         // particle and all its entangled waves.
-//         match status {
-//             SUCCEEDED => {
-//                 if self.entangled_succeeded(true) {
-//                     return Poll::Ready(Ok(None));
-//                 } else {
-//                     return Poll::Ready(Err(Error::EntangledFailure));
-//                 }
-//             }
-//             FAILED => {
-//                 self.entangled_failed(true);
-//                 return Poll::Ready(Err(Error::EntangledFailure));
-//             }
-//             _ => (),
-//         }
-
-//         // Otherwise, poll the inner future and eventually update statuses.
-//         match catch_unwind(AssertUnwindSafe(|| this.fut.poll(ctx))) {
-//             Ok(Poll::Pending) => Poll::Pending,
-//             Ok(Poll::Ready(Ok(ok))) => {
-//                 self.succeeded();
-//                 Poll::Ready(Ok(Some(ok)))
-//             }
-//             Ok(Poll::Ready(Err(err))) => {
-//                 self.failed();
-//                 Poll::Ready(Err(Error::Error(err.into())))
-//             }
-//             Err(err) => {
-//                 self.failed();
-//                 Poll::Ready(Err(Error::Panic(err)))
-//             }
-//         }
-//     }
-// }
-
-// impl<F, T, E> Future for ParticleTask<F>
-// where
-//     F: Future<Output = Result<T, E>>,
-//     E: Into<anyhow::Error>,
-// {
-//     type Output = ();
-
-//     fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-//         match self.project().particle.poll(ctx) {
-//             Poll::Ready(_) => Poll::Ready(()),
-//             Poll::Pending => Poll::Pending,
-//         }
-//     }
-// }
-
-// impl Future for Wave {
-//     type Output = Result<(), Error>;
-
-//     fn poll(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-//         let mut listener = if let Some(listener) = self.listener.take() {
-//             listener
-//         } else {
-//             // Create a new `EventListener` first to be sure that the wave's status isn't updated
-//             // between the time we first check it and the time we finish creating the listener.
-//             let listener = self.inner.event.listen();
-//             match self.inner.status.load(Ordering::SeqCst) {
-//                 SUCCEEDED | ENTANGLED_SUCCEEDED => return Poll::Ready(Ok(())),
-//                 FAILED => return Poll::Ready(Err(Error::ParticleFailure)),
-//                 ENTANGLED_FAILED => return Poll::Ready(Err(Error::EntangledFailure)),
-//                 _ => listener,
-//             }
-//         };
-
-//         if Pin::new(&mut listener).poll(ctx).is_ready() {
-//             match self.inner.status.load(Ordering::SeqCst) {
-//                 SUCCEEDED | ENTANGLED_SUCCEEDED => Poll::Ready(Ok(())),
-//                 FAILED => Poll::Ready(Err(Error::ParticleFailure)),
-//                 ENTANGLED_FAILED => Poll::Ready(Err(Error::EntangledFailure)),
-//                 _ => unreachable!(),
-//             }
-//         } else {
-//             self.listener = Some(listener);
-//             Poll::Pending
-//         }
-//     }
-// }
-
-// impl Clone for Wave {
-//     fn clone(&self) -> Self {
-//         Wave {
-//             inner: self.inner.clone(),
-//             listener: None,
-//         }
-//     }
-// }

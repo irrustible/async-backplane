@@ -17,80 +17,37 @@ that is easy and fun to use. Build highly reliable, efficient sytems!
 
 ## Status.
 
-Getting close to alpha? Doesn't actually run yet.
+Getting close to alpha? Doesn't actually run yet but the design is
+more or less there. Coming soon!
 
-<!-- ## Usage -->
+## Theory
 
-<!-- Don't. But here's what it might look like when it works: -->
+Tingle is a 'reliability backplane' for `futures`-based
+applications. Participating Futures connect to the backplane through a
+`Device`. Devices may connect to other Devices through `Lines` to
+notify each other of their disconnection from the backplane.
 
-<!-- ```rust -->
-<!-- use core::time::Duration; -->
-<!-- use tingle::{Entanglement, Kind, Quantum}; -->
-<!-- use piper::chan; -->
+When connecting lines, there are two sides to consider:
+* Devices whose disconnection I wish to know about.
+* Devices which wish to know about my disconnection.
 
-<!-- async fn root_supervisor(&mut q: Quantum) { -->
-<!--   q.spawn(app_supervisor, Kind::Supervisor); -->
-<!-- } -->
+We say we 'monitor' the first kind and 'attach' the second kind. If we
+both attach and monitor, we say we 'link'. A Device implements
+`Stream`, so you can poll it for disconnections of monitored Devices.
 
-<!-- async fn app_supervisor(&mut q: Quantum) { -->
-<!--   q.spawn_link(Kind::Supervisor); -->
-<!-- } -->
+With `Supervised`, you can wrap a Future such that it automatically
+polls for disconnections when polling the inner future. If a linked
+Device exits for any reason other than that it successfully completed,
+`Supervised` will resolve to `Err(Crash)`. If the inner future exits
+with `Ok(val)`, it will resolve to `Ok(val)`. If the inner future
+exists with `Err(err)`, it will return `Err(Crash::Failure(err))`.
 
-<!-- fn main() { -->
-<!--   tingle::run(root_supervisor) -->
-<!-- } -->
-<!-- ``` -->
-
-<!-- ## Guide -->
-
-<!-- Participating `Future`s ("quanta") are spawned onto an executor with a -->
-<!-- `Quantum`, a handle into the backplane. Quanta may observe the -->
-<!-- termination ("decoherence") of other quanta through a process known as -->
-<!-- "entanglement". -->
-
-
-<!-- It may observe the `Decoherence` of other Quanta when -->
-<!-- they finish executing -->
-
-<!-- A `Quantum` corresponds to an erlang process - a logical concurrent -->
-<!-- thread of execution. It may `entangle` and `untangle` (undo -->
-<!-- entanglement) with other quanta if it has their addresses to do -->
-<!-- so. When the `Quantum` exits, it will notify all entangled quannta. -->
-
-<!-- Under the hood, the set of interactions between two quanta are limited: -->
-
-<!-- * request to entangle with the other -->
-<!-- * request to untangle (undo entanglement) from the other -->
-<!-- * request the other to exit -->
-<!-- * notify the other of our exit -->
-
-<!-- Processes may respond to exit notifications differently. The default -->
-<!-- behaviour is to exit if the result is considered a failure (as -->
-<!-- modelled by the simple `Superposition` trait, which is already -->
-<!-- implemented for `Result`). -->
-
-<!-- A `Supervisor` disables the default behaviour and applies a recovery -->
-<!-- strategy, which may involve restarting other processes or in grave -->
-<!-- circumstances, exiting itself (delegating to *its* supervisor the -->
-<!-- responsibility for restarting it). -->
-
-## Naming
-
-The QM analogy was inspired by the idea of two processes having their
-fate linked by entanglement. Erlang's uses the term 'links' (although
-'monitors' are related to `Observer` entanglement). It's also a quiet
-tribute to Joe Armstrong (the inventor of Erlang), who was a physicist
-before he was a programmer.
-
-Yes, we've taken a little bit of artistic license in interpretation,
-but there's a pleasing similarity with some aspects of QM.
-
-I wanted to call this library 'Tangle' but someone already took the
-crate name.
+Next up, we will deal with Supervisors, which are special processes
+designed to deal with failure.
 
 ## Copyright and License
 
-Copyright (c) 2020 James Laver.
+Copyright (c) 2020 James Laver, tingle Contributors
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this
