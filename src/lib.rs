@@ -4,9 +4,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::sync::Arc;
 use async_channel::Receiver;
-use futures_core::stream::Stream;
+use futures_lite::stream::Stream;
 use maybe_unwind::{capture_panic_info, maybe_unwind, Unwind};
 use std::panic;
+use pin_project_lite::pin_project;
 
 mod plugboard;
 use plugboard::Plugboard;
@@ -54,70 +55,59 @@ pub enum Disconnect {
     Cascade(DeviceID),
 }
 
+impl Disconnect {
+    fn completed(&self) -> bool { *self == Disconnect::Complete }
+    fn crashed(&self) -> bool { !self.completed() }
+}
+
 /// Something went wrong with a Device
 #[derive(Debug)]
-pub enum Crash<C> {
+pub enum Crash<C=()> {
     Panic(Unwind),
     Fail(C),
-    Cascade(DeviceID),
+    Cascade(DeviceID, Disconnect),
 }
 
-
-pub struct Supervised<F: Future> {
-    fut: F,
-    device: Option<Device>,
-}
-
-impl<F, C, T> Future for Supervised<F>
-where F: Future<Output=Result<T, C>> {
-    type Output = Result<T, Crash<C>>;
-    fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-        let this = unsafe { self.get_unchecked_mut() };
-        if let Some(ref mut device) = &mut this.device {
-            loop {
-                match Device::poll_next(Pin::new(device), ctx) {
-                    Poll::Ready(Some((id, disconnect))) => {
-                        match disconnect {
-                            Disconnect::Crash => {
-                                let disco = Disconnect::Cascade(device.device_id());
-                                device.plugboard.broadcast(device.device_id(), disco);
-                                return Poll::Ready(Err(Crash::Cascade(id)));
-                            }
-                            Disconnect::Cascade(from) => {
-                                device.plugboard.broadcast(device.device_id(), disconnect);
-                                return Poll::Ready(Err(Crash::Cascade(from)));
-                            }
-                            _ => () // spin
-                        }
-                    }
-                    Poll::Pending => {
-                        let fut = unsafe { Pin::new_unchecked(&mut this.fut) };
-                        return match maybe_unwind(AssertUnwindSafe(|| fut.poll(ctx))) {
-                            Ok(Poll::Pending) => Poll::Pending,
-                            Ok(Poll::Ready(Ok(val))) => {
-                                device.plugboard.broadcast(device.device_id(), Disconnect::Complete);
-                                return Poll::Ready(Ok(val))
-                            }
-                            Ok(Poll::Ready(Err(val))) => {
-                                device.plugboard.broadcast(device.device_id(), Disconnect::Crash);
-                                return Poll::Ready(Err(Crash::Fail(val.into())))
-                            }
-                            Err(unwind) => {
-                                device.plugboard.broadcast(device.device_id(), Disconnect::Crash);
-                                return Poll::Ready(Err(Crash::Panic(unwind)));
-                            }
-                        }
-                    }
-                    Poll::Ready(None) => { return Poll::Pending; } // shouldn't happen
-                }
-            }
+impl<C> Crash<C> {
+    pub fn try_convert<D>(self) -> Result<Crash<D>, Crash<C>> {
+        match self {
+            Crash::Panic(unwind) => Ok(Crash::Panic(unwind)),
+            Crash::Cascade(did, disco) => Ok(Crash::Cascade(did, disco)),
+            _ => Err(self),
         }
-        Poll::Pending
+    }
+}
+
+/// A Device is a computation's connection to the backplane
+pub struct Device {
+    disconnects: Receiver<(DeviceID, Disconnect)>,
+    plugboard: Arc<Plugboard>,
+}
+
+impl Device {
+    pub fn new() -> Self {
+        let (send, disconnects) = async_channel::unbounded();
+        let plugboard = Arc::new(Plugboard::new(send));
+        Device { disconnects, plugboard }
+    }
+
+    // pub fn new_monitored(by: Line) -> Self {
+    //     let (send, disconnects) = async_channel::unbounded();
+    //     let plugboard = Arc::new(Plugboard::new(send));
+    //     Device { disconnects, plugboard }
+    // }
+
+    pub fn open_line(&self) -> Line {
+        Line { plugboard: self.plugboard.clone() }
+    }
+
+    pub fn disconnect(self, disconnect: Disconnect) {
+        self.plugboard.broadcast(self.device_id(), disconnect);
     }
 }
 
 // #[cfg(feature = "smol")]
-// impl<F> Device<F> {
+// impl Device {
 //     pub fn spawn<E>(fut: F) -> Line
 //     where
 //         F: Future<Output = Result<(), E>> + Send + 'static,
@@ -154,79 +144,6 @@ where F: Future<Output=Result<T, C>> {
 //         line
 //     }
 // }
-
-// #[cfg(feature = "smol")]
-// impl Line {
-//     pub fn spawn<F, E>(&self, fut: F) -> Line
-//     where
-//         F: Future<Output = Result<(), E>> + Send + 'static,
-//         E: Into<anyhow::Error>,
-//     {
-//         let mut device = Device::new(fut);
-//         let line = device.as_line();
-
-//         device.entangle(self.clone());
-//         Task::spawn(DeviceTask { device }).detach();
-
-//         line
-//     }
-
-//     pub fn spawn_blocking<F, E>(&self, fut: F) -> Line
-//     where
-//         F: Future<Output = Result<(), E>> + Send + 'static,
-//         E: Into<anyhow::Error>,
-//     {
-//         let mut device = Device::new(fut);
-//         let line = device.as_line();
-
-//         device.entangle(self.clone());
-//         Task::blocking(DeviceTask { device }).detach();
-
-//         line
-//     }
-
-//     pub fn spawn_local<F, E>(&self, fut: F) -> Line
-//     where
-//         F: Future<Output = Result<(), E>> + 'static,
-//         E: Into<anyhow::Error>,
-//     {
-//         let mut device = Device::new(fut);
-//         let line = device.as_line();
-
-//         device.entangle(self.clone());
-//         Task::local(DeviceTask { device }).detach();
-
-//         line
-//     }
-// }
-
-/// A Device is a computation's connection to the backplane
-pub struct Device {
-    disconnects: Receiver<(DeviceID, Disconnect)>,
-    plugboard: Arc<Plugboard>,
-}
-
-impl Device {
-    pub fn new() -> Self {
-        let (send, disconnects) = async_channel::unbounded();
-        let plugboard = Arc::new(Plugboard::new(send));
-        Device { disconnects, plugboard }
-    }
-
-    // pub fn new_monitored(by: Line) -> Self {
-    //     let (send, disconnects) = async_channel::unbounded();
-    //     let plugboard = Arc::new(Plugboard::new(send));
-    //     Device { disconnects, plugboard }
-    // }
-
-    pub fn open_line(&self) -> Line {
-        Line { plugboard: self.plugboard.clone() }
-    }
-
-    pub fn disconnect(self, disconnect: Disconnect) {
-        self.plugboard.broadcast(self.device_id(), disconnect);
-    }
-}
 
 impl Unpin for Device {}
 
@@ -307,6 +224,174 @@ impl Pluggable for Line {
         Ok(())
     }
 }
+
+/// Wraps a Future such that it catches panics when being polled.
+pub struct DontPanic<F: Future> {
+    fut: F,
+}
+
+impl<F, T> Future for DontPanic<F>
+where F: Future<Output=T> {
+    type Output = Result<T, Unwind>;
+
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+        // pin_project!() cannot handle this scenario, it really has to be unsafe.
+        let fut = unsafe { Pin::new_unchecked(&mut self.get_unchecked_mut().fut) };
+        match maybe_unwind(AssertUnwindSafe(|| fut.poll(ctx))) {
+            Ok(Poll::Pending) => Poll::Pending,
+            Ok(Poll::Ready(val)) => Poll::Ready(Ok(val)),
+            Err(unwind) => Poll::Ready(Err(unwind))
+        }
+    }
+}
+
+pin_project! {
+    /// Wraps a Future such that it will return `Err(Crash<C>)` if it
+    /// crashes or one of the Futures it is monitoring crashes.
+    pub struct Monitoring<'a, F: Future> {
+        #[pin]
+        fut: DontPanic<F>,
+        device: Option<&'a mut Device>
+    }
+}
+
+impl<'a, F, C, T> Future for Monitoring<'a, F>
+where F: Future<Output=Result<T, C>> {
+    type Output = Result<T, Crash<C>>;
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+        let mut this = self.project();
+        if let Some(ref mut device) = &mut this.device {
+            loop {
+                match Device::poll_next(Pin::new(device), ctx) {
+                    Poll::Ready(Some((id, disconnect))) => {
+                        if disconnect.crashed() {
+                            return Poll::Ready(Err(Crash::Cascade(id, disconnect)));
+                        }
+                    }
+                    Poll::Pending => {
+                        return match DontPanic::poll(this.fut, ctx) {
+
+                            Poll::Pending => Poll::Pending,
+
+                            Poll::Ready(Ok(Ok(val))) => Poll::Ready(Ok(val)),
+
+                            Poll::Ready(Ok(Err(val))) =>
+                                Poll::Ready(Err(Crash::Fail(val))),
+
+                            Poll::Ready(Err(unwind)) =>
+                                Poll::Ready(Err(Crash::Panic(unwind))),
+
+                        }
+                    }
+                    Poll::Ready(None) => unreachable!(),
+                }
+            }
+        } else {
+            Poll::Pending // We have already completed
+        }
+    }
+}
+
+// pub struct Monitored<F: Future> {
+//     fut: DontPanic<F>,
+//     device: Option<Device>,
+// }
+
+// impl<F, C, T> Future for Monitored<'a, F>
+// where F: Future<Output=Result<T, C>> {
+//     type Output = Result<T, Crash<C>>;
+//     fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+//         let mut this = self.project();
+//         if let Some(ref mut device) = &mut this.device {
+//             loop {
+//                 match Device::poll_next(Pin::new(device), ctx) {
+//                     Poll::Ready(Some((id, disconnect))) => {
+//                         if disconnect.crashed() {
+//                             return Poll::Ready(Err(Crash::Cascade(id, disconnect)));
+//                         }
+//                     }
+//                     Poll::Pending => {
+//                         return match DontPanic::poll(this.fut, ctx) {
+
+//                             Poll::Pending => Poll::Pending,
+
+//                             Poll::Ready(Ok(Ok(val))) => Poll::Ready(Ok(val)),
+
+//                             Poll::Ready(Ok(Err(val))) =>
+//                                 Poll::Ready(Err(Crash::Fail(val))),
+
+//                             Poll::Ready(Err(unwind)) =>
+//                                 Poll::Ready(Err(Crash::Panic(unwind))),
+
+//                         }
+//                     }
+//                     Poll::Ready(None) => unreachable!(),
+//                 }
+//             }
+//         } else {
+//             Poll::Pending // We have already completed
+//         }
+//     }
+// }
+
+// pub trait Reporter {
+//     fn report(&mut self, device: &mut Device, &mut Crash,
+// }
+
+
+
+// pub struct Crashy<F: Future> {
+//     fut: F,
+//     device: Option<Device>,
+// }
+
+// impl<F, C, T> Future for Supervised<F>
+// where F: Future<Output=Result<T, C>> {
+//     type Output = Result<T, Crash<C>>;
+//     fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
+//         let this = unsafe { self.get_unchecked_mut() };
+//         if let Some(ref mut device) = &mut this.device {
+//             loop {
+//                 match Device::poll_next(Pin::new(device), ctx) {
+//                     Poll::Ready(Some((id, disconnect))) => {
+//                         match disconnect {
+//                             Disconnect::Crash => {
+//                                 let disco = Disconnect::Cascade(device.device_id());
+//                                 device.plugboard.broadcast(device.device_id(), disco);
+//                                 return Poll::Ready(Err(Crash::Cascade(id)));
+//                             }
+//                             Disconnect::Cascade(from) => {
+//                                 device.plugboard.broadcast(device.device_id(), disconnect);
+//                                 return Poll::Ready(Err(Crash::Cascade(from)));
+//                             }
+//                             _ => () // spin
+//                         }
+//                     }
+//                     Poll::Pending => {
+//                         let fut = unsafe { Pin::new_unchecked(&mut this.fut) };
+//                         return match maybe_unwind(AssertUnwindSafe(|| fut.poll(ctx))) {
+//                             Ok(Poll::Pending) => Poll::Pending,
+//                             Ok(Poll::Ready(Ok(val))) => {
+//                                 device.plugboard.broadcast(device.device_id(), Disconnect::Complete);
+//                                 return Poll::Ready(Ok(val))
+//                             }
+//                             Ok(Poll::Ready(Err(val))) => {
+//                                 device.plugboard.broadcast(device.device_id(), Disconnect::Crash);
+//                                 return Poll::Ready(Err(Crash::Fail(val.into())))
+//                             }
+//                             Err(unwind) => {
+//                                 device.plugboard.broadcast(device.device_id(), Disconnect::Crash);
+//                                 return Poll::Ready(Err(Crash::Panic(unwind)));
+//                             }
+//                         }
+//                     }
+//                     Poll::Ready(None) => { return Poll::Pending; } // shouldn't happen
+//                 }
+//             }
+//         }
+//         Poll::Pending
+//     }
+// }
 
 /// Sets the thread local panic handler to record the unwind information
 pub fn replace_panic_hook() {

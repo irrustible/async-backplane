@@ -1,5 +1,5 @@
 [package]
-name = "tingle"
+name = "async-backplane"
 version = "0.1.0"
 readme = "README.md"
 license = "MPL-2.0"
@@ -12,15 +12,18 @@ default = ["smol"]
 [dependencies]
 async-channel = "1.1"
 concurrent-queue = "1.1"
-futures-core = "0.3"
+futures-lite = "0.1.5"
 intmap = "0.7"
 maybe-unwind = "0.3"
+# smallvec = "1.4"
+pin-project-lite = "0.1"
 
 [dependencies.rw_lease]
-# path = "../rw_lease"
-git = "https://github.com/irrustible/rw_lease"
-branch = "main"
+path = "../rw_lease"
+# git = "https://github.com/irrustible/rw_lease"
+# branch = "main"
 # version = "0.1"
+default-features = false
 
 [dependencies.smol]
 version = "0.1"
