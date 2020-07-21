@@ -1,12 +1,12 @@
 use async_channel::{self, Sender};
 use concurrent_queue::ConcurrentQueue;
 use intmap::IntMap;
-use smol;
 use std::convert::TryInto; // turn a usize into a u64
 use std::sync::atomic::{AtomicUsize, spin_loop_hint};
 use rw_lease::{ReadGuard, Blocked, RWLease};
 
 use crate::{DeviceID, Disconnect, Line, LinkError, Pluggable};
+use crate::sending::BulkSend;
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum LineOp {
@@ -32,7 +32,9 @@ impl Plugboard {
         self.lines.push(LineOp::Detach(did)).map_err(|_| error)
     }
     /// Announce to all our monitors that we are disconnecting
-    pub(crate) fn broadcast(&self, did: DeviceID, disconnect: Disconnect) {
+    pub(crate) fn broadcast(&self, did: DeviceID, disconnect: Disconnect)
+                            -> BulkSend<(DeviceID, Disconnect)>
+    {
         // It may take a few moments to drain, so let's kick that off first.
         let mut drain = self.disconnects.try_write().unwrap();
         self.lines.close(); // no point taking any more link requests
@@ -49,16 +51,19 @@ impl Plugboard {
                 }
             }
         }
+        let mut bulk = BulkSend::new((did, disconnect));
         for (_, line) in lines.drain() {
-            line.plugboard.notify(did, disconnect);
+            if let Some(sender) = line.plugboard.clone_sender() {
+                bulk.add_sender(sender)
+            }
         }
         // The readers have *probably* drained away by now
         loop { // Danger Will Robinson - will we spin forever?
             match drain.try_upgrade() {
-                Ok(mut result) => {
+                Ok(mut sender_option) => {
                     #[allow(unused_must_use)]
-                    result.take();
-                    return;
+                    sender_option.take();
+                    return bulk;
                 }
                 Err(new_drain) => {
                     drain = new_drain;
@@ -68,14 +73,11 @@ impl Plugboard {
         }
     }
 
-    /// Announce our exit to the device this plugboard belongs to
-    pub(crate) fn notify(&self, did: DeviceID, disconnect: Disconnect) {
+    fn clone_sender(&self) -> Option<Sender<(DeviceID, Disconnect)>> {
         if let Ok(lock) = self.read_disconnects() {
-            if let Some(sender) = &*lock {
-                let send = send_in_new_thread(sender.clone(), (did, disconnect));
-                smol::Task::spawn(send).detach(); // expensive? also naughty - feature flag!
-            }
+            if let Some(sender) = &*lock { return Some(sender.clone()); }
         }
+        None
     }
 
     // spin loop for read access
@@ -93,11 +95,4 @@ impl Plugboard {
             }
         }
     }
-
-}
-
-#[allow(unused_must_use)]
-async fn send_in_new_thread<T: 'static + Send>(sender: Sender<T>, val: T) {
-    sender.send(val).await;
-    ()
 }

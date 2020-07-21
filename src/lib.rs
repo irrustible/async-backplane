@@ -1,13 +1,18 @@
+#![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
+use std::any::Any;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::sync::Arc;
-use async_channel::Receiver;
+use async_channel::{Receiver, Sender};
 use futures_lite::stream::Stream;
 use maybe_unwind::{capture_panic_info, maybe_unwind, Unwind};
 use std::panic;
 use pin_project_lite::pin_project;
+
+mod sending;
+pub use sending::BulkSend;
 
 mod plugboard;
 use plugboard::Plugboard;
@@ -49,27 +54,37 @@ pub enum LinkError {
 /// The device has dropped off the bus
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Disconnect {
+    /// Success!
     Complete,
+    /// The device errored
     Crash,
     /// A device we depended on errored
     Cascade(DeviceID),
 }
 
 impl Disconnect {
+    /// Whether the disconnect was a successful completion
     fn completed(&self) -> bool { *self == Disconnect::Complete }
+    /// Whether the disconnect was a crash (or a cascade, which counts)
     fn crashed(&self) -> bool { !self.completed() }
 }
 
+pub type FuckingAny = Box<dyn Any + 'static + Send>;
+
 /// Something went wrong with a Device
 #[derive(Debug)]
-pub enum Crash<C=()> {
+pub enum Crash<C=FuckingAny>
+where C: 'static + Send {
+    /// If you installed the panic handler, this will be rich
     Panic(Unwind),
+    /// Generically, something went wrong
     Fail(C),
+    /// A device we depend upon disconnected
     Cascade(DeviceID, Disconnect),
 }
 
-impl<C> Crash<C> {
-    pub fn try_convert<D>(self) -> Result<Crash<D>, Crash<C>> {
+impl<C: 'static + Send> Crash<C> {
+    pub fn try_convert<D: 'static + Send>(self) -> Result<Crash<D>, Crash<C>> {
         match self {
             Crash::Panic(unwind) => Ok(Crash::Panic(unwind)),
             Crash::Cascade(did, disco) => Ok(Crash::Cascade(did, disco)),
@@ -80,8 +95,8 @@ impl<C> Crash<C> {
 
 /// A Device is a computation's connection to the backplane
 pub struct Device {
-    disconnects: Receiver<(DeviceID, Disconnect)>,
     plugboard: Arc<Plugboard>,
+    disconnects: Receiver<(DeviceID, Disconnect)>,
 }
 
 impl Device {
@@ -101,10 +116,21 @@ impl Device {
         Line { plugboard: self.plugboard.clone() }
     }
 
-    pub fn disconnect(self, disconnect: Disconnect) {
-        self.plugboard.broadcast(self.device_id(), disconnect);
+    pub fn disconnect(self, disconnect: Disconnect) -> BulkSend<(DeviceID, Disconnect)> {
+        self.plugboard.broadcast(self.device_id(), disconnect)
     }
+
+    pub fn monitoring<'a, F: Future>(&'a mut self, f: F) -> Monitoring<'a, F> {
+        Monitoring::new(f, self)
+    }
+
+    pub fn managed<'a, F: Future>(self, crash: Sender<(DeviceID, Crash)>, f: F) -> Managed<F> {
+        Managed::new(f, crash, self)
+    }
+
 }
+
+    
 
 // #[cfg(feature = "smol")]
 // impl Device {
@@ -225,9 +251,15 @@ impl Pluggable for Line {
     }
 }
 
-/// Wraps a Future such that it catches panics when being polled.
+/// Wraps a Future such that it traps panics
 pub struct DontPanic<F: Future> {
     fut: F,
+}
+
+impl<F: Future> DontPanic<F> {
+    fn new(fut: F) -> Self {
+        DontPanic { fut }
+    }
 }
 
 impl<F, T> Future for DontPanic<F>
@@ -255,8 +287,15 @@ pin_project! {
     }
 }
 
+impl<'a, F: Future> Monitoring<'a, F> {
+    pub fn new(fut: F, device: &'a mut Device) -> Self {
+        Monitoring { fut: DontPanic::new(fut), device: Some(device) }
+    }
+}
+
 impl<'a, F, C, T> Future for Monitoring<'a, F>
-where F: Future<Output=Result<T, C>> {
+where F: Future<Output=Result<T, C>>,
+      C: 'static + Send {
     type Output = Result<T, Crash<C>>;
     fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
         let mut this = self.project();
@@ -292,105 +331,83 @@ where F: Future<Output=Result<T, C>> {
     }
 }
 
-// pub struct Monitored<F: Future> {
-//     fut: DontPanic<F>,
-//     device: Option<Device>,
-// }
+pin_project! {
+    pub struct Managed<F: Future> {
+        #[pin]
+        fut: DontPanic<F>,
+        crash: Option<Sender<(DeviceID, Crash)>>,
+        device: Option<Device>,
+        sending: Option<BulkSend<(DeviceID, Disconnect)>>,
+    }
+}
 
-// impl<F, C, T> Future for Monitored<'a, F>
-// where F: Future<Output=Result<T, C>> {
-//     type Output = Result<T, Crash<C>>;
-//     fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-//         let mut this = self.project();
-//         if let Some(ref mut device) = &mut this.device {
-//             loop {
-//                 match Device::poll_next(Pin::new(device), ctx) {
-//                     Poll::Ready(Some((id, disconnect))) => {
-//                         if disconnect.crashed() {
-//                             return Poll::Ready(Err(Crash::Cascade(id, disconnect)));
-//                         }
-//                     }
-//                     Poll::Pending => {
-//                         return match DontPanic::poll(this.fut, ctx) {
+impl<F: Future> Managed<F> {
+    pub fn new(fut: F, crash: Sender<(DeviceID,Crash)>, device: Device) -> Self {
+        Managed {
+            fut: DontPanic::new(fut),
+            crash: Some(crash),
+            device: Some(device),
+            sending: None,
+        }
+    }
+}
 
-//                             Poll::Pending => Poll::Pending,
+impl<F, C, T> Future for Managed<F>
+where F: Future<Output=Result<T, C>>,
+      C: 'static + Send {
+    type Output = ();
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<()> {
+        let mut this = self.project();
+        if let Some(ref mut device) = &mut this.device {
+            loop {
+                match Device::poll_next(Pin::new(device), ctx) {
+                    Poll::Ready(Some((id, disconnect))) => {
+                        if disconnect.crashed() {
+                            let disco = Disconnect::Cascade(device.device_id());
+                            device.plugboard.broadcast(device.device_id(), disco);
+                            #[allow(unused_must_use)]
+                            if let Some(crash) = &this.crash {
+                                crash.try_send((device.device_id(), Crash::Cascade(id, disconnect)));
+                            }
+                            return Poll::Ready(());
+                        }
+                    }
+                    Poll::Pending => {
+                        return match DontPanic::poll(this.fut, ctx) {
+                            Poll::Pending => Poll::Pending,
+                            Poll::Ready(Ok(Ok(_))) => Poll::Ready(()),
 
-//                             Poll::Ready(Ok(Ok(val))) => Poll::Ready(Ok(val)),
+                            Poll::Ready(Ok(Err(val))) => {
+                                #[allow(unused_must_use)]
+                                if let Some(crash) = &this.crash {
+                                    crash.try_send((device.device_id(), Crash::Fail(Box::new(val))));
+                                }
+                                Poll::Ready(())
+                            }
 
-//                             Poll::Ready(Ok(Err(val))) =>
-//                                 Poll::Ready(Err(Crash::Fail(val))),
-
-//                             Poll::Ready(Err(unwind)) =>
-//                                 Poll::Ready(Err(Crash::Panic(unwind))),
-
-//                         }
-//                     }
-//                     Poll::Ready(None) => unreachable!(),
-//                 }
-//             }
-//         } else {
-//             Poll::Pending // We have already completed
-//         }
-//     }
-// }
+                            Poll::Ready(Err(unwind)) => {
+                                #[allow(unused_must_use)]
+                                if let Some(crash) = &this.crash {
+                                    crash.try_send((device.device_id(), Crash::Panic(unwind)));
+                                }
+                                Poll::Ready(())
+                            }
+                        }
+                    }
+                    Poll::Ready(None) => unreachable!(),
+                }
+            }
+        } else if let Some(ref mut sending) = &mut this.sending {
+            let pin = unsafe { Pin::new_unchecked(sending) };
+            BulkSend::poll(pin, ctx)
+        } else {
+            Poll::Pending // We have already completed
+        }
+    }
+}
 
 // pub trait Reporter {
-//     fn report(&mut self, device: &mut Device, &mut Crash,
-// }
-
-
-
-// pub struct Crashy<F: Future> {
-//     fut: F,
-//     device: Option<Device>,
-// }
-
-// impl<F, C, T> Future for Supervised<F>
-// where F: Future<Output=Result<T, C>> {
-//     type Output = Result<T, Crash<C>>;
-//     fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-//         let this = unsafe { self.get_unchecked_mut() };
-//         if let Some(ref mut device) = &mut this.device {
-//             loop {
-//                 match Device::poll_next(Pin::new(device), ctx) {
-//                     Poll::Ready(Some((id, disconnect))) => {
-//                         match disconnect {
-//                             Disconnect::Crash => {
-//                                 let disco = Disconnect::Cascade(device.device_id());
-//                                 device.plugboard.broadcast(device.device_id(), disco);
-//                                 return Poll::Ready(Err(Crash::Cascade(id)));
-//                             }
-//                             Disconnect::Cascade(from) => {
-//                                 device.plugboard.broadcast(device.device_id(), disconnect);
-//                                 return Poll::Ready(Err(Crash::Cascade(from)));
-//                             }
-//                             _ => () // spin
-//                         }
-//                     }
-//                     Poll::Pending => {
-//                         let fut = unsafe { Pin::new_unchecked(&mut this.fut) };
-//                         return match maybe_unwind(AssertUnwindSafe(|| fut.poll(ctx))) {
-//                             Ok(Poll::Pending) => Poll::Pending,
-//                             Ok(Poll::Ready(Ok(val))) => {
-//                                 device.plugboard.broadcast(device.device_id(), Disconnect::Complete);
-//                                 return Poll::Ready(Ok(val))
-//                             }
-//                             Ok(Poll::Ready(Err(val))) => {
-//                                 device.plugboard.broadcast(device.device_id(), Disconnect::Crash);
-//                                 return Poll::Ready(Err(Crash::Fail(val.into())))
-//                             }
-//                             Err(unwind) => {
-//                                 device.plugboard.broadcast(device.device_id(), Disconnect::Crash);
-//                                 return Poll::Ready(Err(Crash::Panic(unwind)));
-//                             }
-//                         }
-//                     }
-//                     Poll::Ready(None) => { return Poll::Pending; } // shouldn't happen
-//                 }
-//             }
-//         }
-//         Poll::Pending
-//     }
+//     fn report(&mut self, device: &mut Device, &mut Crash)
 // }
 
 /// Sets the thread local panic handler to record the unwind information
