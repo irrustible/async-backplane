@@ -31,8 +31,7 @@ impl DeviceID {
     }
 }
 
-/// There is a problem with the link - at least one end of it is down.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum LinkError {
     /// We can't because we are down
     DeviceDown,
@@ -71,6 +70,32 @@ where C: 'static + Send {
     Fail(C),
     /// A device we depend upon disconnected
     Cascade(DeviceID, Disconnect),
+}
+
+impl<C: Send> Crash<C> {
+    pub fn is_panic(&self) -> bool {
+        if let Crash::Panic(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_fail(&self) -> bool {
+        if let Crash::Fail(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_cascade(&self) -> bool {
+        if let Crash::Cascade(_, _) = self {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl<C: Any + 'static + Send> Crash<C> {
