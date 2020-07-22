@@ -5,7 +5,7 @@ use futures_lite::{Future, Stream};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use crate::{BulkSend, Crash, DeviceID, Disconnect, Line, LinkError, Managed, Monitoring, Pluggable};
+use crate::{BulkSend, Crash, DeviceID, Disconnect, Line, LinkError, Monitoring, Pluggable};
 use crate::plugboard::Plugboard;
 
 /// A Device is a computation's connection to the backplane
@@ -43,10 +43,6 @@ impl Device {
 
     pub fn monitoring<'a, F: Future>(&'a mut self, f: F) -> Monitoring<'a, F> {
         Monitoring::new(f, self)
-    }
-
-    pub fn managed<F: Future>(self, f: F) -> Managed<F> {
-        Managed::new(f, self)
     }
 
 }

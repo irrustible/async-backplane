@@ -20,9 +20,6 @@ pub use device::Device;
 mod monitoring;
 pub use monitoring::Monitoring;
 
-mod managed;
-pub use managed::Managed;
-
 /// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct DeviceID {
@@ -89,12 +86,22 @@ where C: 'static + Send {
     Cascade(DeviceID, Disconnect),
 }
 
-impl<C: 'static + Send> Crash<C> {
-    pub fn try_convert<D: 'static + Send>(self) -> Result<Crash<D>, Crash<C>> {
+impl<C: Any + 'static + Send> Crash<C> {
+    fn as_disconnect(&self) -> Disconnect {
         match self {
-            Crash::Panic(unwind) => Ok(Crash::Panic(unwind)),
-            Crash::Cascade(did, disco) => Ok(Crash::Cascade(did, disco)),
-            _ => Err(self),
+            Crash::Panic(_) => Disconnect::Crash,
+            Crash::Fail(_) => Disconnect::Crash,
+            Crash::Cascade(who, _) => Disconnect::Cascade(*who),
+        }
+    }
+}
+
+impl<C: 'static + Any + Send> Crash<C> {
+    pub fn boxed(self) -> Crash<FuckingAny> {
+        match self {
+            Crash::Panic(unwind) => Crash::Panic(unwind),
+            Crash::Fail(any) => Crash::Fail(Box::new(any)),
+            Crash::Cascade(did, disco) => Crash::Cascade(did, disco),
         }
     }
 }
@@ -165,6 +172,22 @@ where F: Future<Output=T> {
             Ok(Poll::Ready(val)) => Poll::Ready(Ok(val)),
             Err(unwind) => Poll::Ready(Err(unwind))
         }
+    }
+}
+
+pub async fn managed<'a, F, G, C, T>(mut device: Device, f: F)
+where F: FnOnce() -> G,
+      G: Future<Output=Result<T,C>>,
+      C: Any + 'static + Send {
+    let did = device.device_id();
+    if let Err(crash) = device.monitoring(f()).await {
+        device.plugboard.broadcast(did, crash.as_disconnect()).await;
+        #[allow(unused_must_use)]
+        if let Some(crashes) = &device.crashes {
+            crashes.send((did, crash.boxed())).await;
+        }
+    } else {
+        device.plugboard.broadcast(did, Disconnect::Complete).await;
     }
 }
 
