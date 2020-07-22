@@ -7,6 +7,7 @@ use std::task::{Context, Poll};
 use std::sync::Arc;
 use maybe_unwind::{capture_panic_info, maybe_unwind, Unwind};
 use std::panic;
+use pin_project_lite::pin_project;
 
 mod sending;
 pub use sending::BulkSend;
@@ -149,9 +150,12 @@ impl Pluggable for Line {
     }
 }
 
-/// Wraps a Future such that it traps panics
-pub struct DontPanic<F: Future> {
-    fut: F,
+pin_project! {
+    /// Wraps a Future such that it traps panics
+    pub struct DontPanic<F: Future> {
+        #[pin]
+        fut: F,
+    }
 }
 
 impl<F: Future> DontPanic<F> {
@@ -165,9 +169,8 @@ where F: Future<Output=T> {
     type Output = Result<T, Unwind>;
 
     fn poll(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Self::Output> {
-        // pin_project!() cannot handle this scenario, it really has to be unsafe.
-        let fut = unsafe { Pin::new_unchecked(&mut self.get_unchecked_mut().fut) };
-        match maybe_unwind(AssertUnwindSafe(|| fut.poll(ctx))) {
+        let this = self.project();
+        match maybe_unwind(AssertUnwindSafe(|| this.fut.poll(ctx))) {
             Ok(Poll::Pending) => Poll::Pending,
             Ok(Poll::Ready(val)) => Poll::Ready(Ok(val)),
             Err(unwind) => Poll::Ready(Err(unwind))
