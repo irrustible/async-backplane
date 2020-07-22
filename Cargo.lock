@@ -229,7 +229,6 @@ checksum = "41cc0f7e4d5d4544e8861606a285bb08d3e70712ccc7d2b84d7c0ccfaf4b05ce"
 [[package]]
 name = "rw-lease"
 version = "0.1.0"
-source = "git+https://github.com/irrustible/rw-lease?branch=main#b1f08cd73b8b0fb83a3790fc5617562e7e91cb6d"
 dependencies = [
  "atomic_prim_traits",
  "primitive_traits",

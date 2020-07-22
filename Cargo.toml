@@ -21,9 +21,9 @@ pin-project-lite = "0.1"
 # primitive_traits = "0.2"
 
 [dependencies.rw-lease]
-# path = "../rw-lease"
-git = "https://github.com/irrustible/rw-lease"
-branch = "main"
+path = "../rw-lease"
+# git = "https://github.com/irrustible/rw-lease"
+# branch = "main"
 # version = "0.1"
 default-features = false
 
