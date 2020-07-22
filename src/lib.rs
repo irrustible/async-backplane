@@ -175,19 +175,23 @@ where F: Future<Output=T> {
     }
 }
 
+/// Runs a provided async closure as Monitoring, but relays disconnects to it
 pub async fn managed<'a, F, G, C, T>(mut device: Device, f: F)
+                                     -> Result<T, (DeviceID, Crash<C>)>
 where F: FnOnce() -> G,
       G: Future<Output=Result<T,C>>,
-      C: Any + 'static + Send {
+      C: Any + 'static + Send
+{
     let did = device.device_id();
-    if let Err(crash) = device.monitoring(f()).await {
-        device.plugboard.broadcast(did, crash.as_disconnect()).await;
-        #[allow(unused_must_use)]
-        if let Some(crashes) = &device.crashes {
-            crashes.send((did, crash.boxed())).await;
+    match device.monitoring(f()).await {
+        Ok(val) => {
+            device.plugboard.broadcast(did, Disconnect::Complete).await;
+            Ok(val)
         }
-    } else {
-        device.plugboard.broadcast(did, Disconnect::Complete).await;
+        Err(crash) =>  {
+            device.plugboard.broadcast(did, crash.as_disconnect()).await;
+            Err((did, crash))
+        }
     }
 }
 

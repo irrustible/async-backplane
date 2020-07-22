@@ -1,30 +1,25 @@
 #[cfg(feature = "smol")]
 use smol::Task;
-use async_channel::{self, Receiver, Sender};
+use async_channel::{self, Receiver};
 use futures_lite::{Future, Stream};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use crate::{BulkSend, Crash, DeviceID, Disconnect, Line, LinkError, Monitoring, Pluggable};
+use crate::{BulkSend, DeviceID, Disconnect, Line, LinkError, Monitoring, Pluggable};
 use crate::plugboard::Plugboard;
 
 /// A Device is a computation's connection to the backplane
 pub struct Device {
     pub(crate) plugboard: Arc<Plugboard>,
     pub(crate) disconnects: Receiver<(DeviceID, Disconnect)>,
-    pub(crate) crashes: Option<Sender<(DeviceID, Crash)>>,
 }
 
 impl Device {
 
-    pub fn new(crashes: Sender<(DeviceID, Crash)>) -> Self {
-        Device::new_with_crashes(Some(crashes))
-    }
-
-    pub fn new_with_crashes(crashes: Option<Sender<(DeviceID, Crash)>>) -> Self {
+    pub fn new() -> Self {
         let (send, disconnects) = async_channel::unbounded();
         let plugboard = Arc::new(Plugboard::new(send));
-        Device { disconnects, plugboard, crashes }
+        Device { disconnects, plugboard }
     }
 
     // pub fn new_monitored(by: Line) -> Self {
@@ -53,7 +48,7 @@ impl Device {
     where P: FnOnce(Device) -> F,
           F: 'static + Future + Send
     {
-        let device = Device::new_with_crashes(self.crashes.clone());
+        let device = Device::new();
         let line = device.open_line();
         let p = process(device);
         Task::spawn(async move { p.await; }).detach();
@@ -64,7 +59,7 @@ impl Device {
     where P: FnOnce(Device) -> F,
           F: 'static + Future + Send
     {
-        let device = Device::new_with_crashes(self.crashes.clone());
+        let device = Device::new();
         let line = device.open_line();
         let p = process(device);
         Task::blocking(async move { p.await; }).detach();
@@ -75,7 +70,7 @@ impl Device {
     where P: FnOnce(Device) -> F,
           F: 'static + Future
     {
-        let device = Device::new_with_crashes(self.crashes.clone());
+        let device = Device::new();
         let line = device.open_line();
         let p = process(device);
         Task::local(async move { p.await; }).detach();
