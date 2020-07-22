@@ -1,24 +1,22 @@
 #![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
+use futures_lite::stream::StreamExt;
+use maybe_unwind::{capture_panic_info, maybe_unwind, Unwind};
 use std::any::Any;
 use std::future::Future;
-use std::panic::AssertUnwindSafe;
+use std::panic::{self, AssertUnwindSafe};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::sync::Arc;
-use maybe_unwind::{capture_panic_info, maybe_unwind, Unwind};
-use std::panic;
 
 mod sending;
 pub use sending::BulkSend;
 
 mod plugboard;
-use plugboard::Plugboard;
 
 mod device;
-pub use device::Device;
+pub use device::{Device, Line};
 
-mod monitoring;
-pub use monitoring::Monitoring;
+mod race;
+use race::biased_race;
 
 /// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -32,25 +30,12 @@ impl DeviceID {
     }
 }
 
-pub trait Pluggable {
-    fn device_id(&self) -> DeviceID;
-    /// Ask to be notified when the provided Line disconnects
-    fn monitor(&self, line: Line) -> Result<(), LinkError>;
-    /// Ask to not be notified when the provided Line disconnects
-    fn demonitor(&self, line: &Line) -> Result<(), LinkError>;
-    /// Notify the provided Line when we disconnect
-    fn attach(&self, line: Line) -> Result<(), LinkError>;
-    /// Undo attach
-    fn detach(&self, device_id: DeviceID) -> Result<(), LinkError>;
-    /// Monitor + attach
-    fn link(&self, line: Line) -> Result<(), LinkError>;
-    /// Undo link
-    fn unlink(&self, line: &Line) -> Result<(), LinkError>;
-}
-
+/// There is a problem with the link - at least one end of it is down.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum LinkError {
+    /// We can't because we are down
     DeviceDown,
+    /// We can't because the other Device is down
     LinkDown,
 }
 
@@ -72,6 +57,7 @@ impl Disconnect {
     fn crashed(&self) -> bool { !self.completed() }
 }
 
+/// Something we hope to replace very soon.
 pub type FuckingAny = Box<dyn Any + 'static + Send>;
 
 /// Something went wrong with a Device
@@ -87,7 +73,7 @@ where C: 'static + Send {
 }
 
 impl<C: Any + 'static + Send> Crash<C> {
-    fn as_disconnect(&self) -> Disconnect {
+    pub fn as_disconnect(&self) -> Disconnect {
         match self {
             Crash::Panic(_) => Disconnect::Crash,
             Crash::Fail(_) => Disconnect::Crash,
@@ -103,49 +89,6 @@ impl<C: 'static + Any + Send> Crash<C> {
             Crash::Fail(any) => Crash::Fail(Box::new(any)),
             Crash::Cascade(did, disco) => Crash::Cascade(did, disco),
         }
-    }
-}
-
-#[derive(Clone)]
-pub struct Line {
-    pub(crate) plugboard: Arc<Plugboard>,
-}
-
-impl Eq for Line {}
-
-impl Unpin for Line {}
-
-impl PartialEq for Line {
-    fn eq(&self, other: &Line) -> bool {
-        Arc::ptr_eq(&self.plugboard, &other.plugboard)
-    }
-}
-
-impl Pluggable for Line {
-    fn device_id(&self) -> DeviceID {
-        DeviceID::new(&*self.plugboard as *const _ as usize)
-    }
-    fn monitor(&self, line: Line) -> Result<(), LinkError> {
-        line.plugboard.attach(self.clone(), LinkError::LinkDown)
-    }
-    fn demonitor(&self, line: &Line) -> Result<(), LinkError> {
-        line.plugboard.detach(self.device_id(), LinkError::LinkDown)
-    }
-    fn attach(&self, line: Line) -> Result<(), LinkError> {
-        self.plugboard.attach(line, LinkError::DeviceDown)
-    }
-    fn detach(&self, did: DeviceID) -> Result<(), LinkError> {
-        self.plugboard.detach(did, LinkError::DeviceDown)
-    }
-    fn link(&self, line: Line) -> Result<(), LinkError> {
-        self.monitor(line.clone())?;
-        self.attach(line)?;
-        Ok(())
-    }
-    fn unlink(&self, line: &Line) -> Result<(), LinkError> {
-        self.detach(line.device_id())?;
-        self.demonitor(line)?;
-        Ok(())
     }
 }
 
@@ -175,23 +118,69 @@ where F: Future<Output=T> {
     }
 }
 
-/// Runs a provided async closure as Monitoring, but relays disconnects to it
-pub async fn managed<'a, F, G, C, T>(mut device: Device, f: F)
-                                     -> Result<T, (DeviceID, Crash<C>)>
-where F: FnOnce() -> G,
-      G: Future<Output=Result<T,C>>,
+/// Races the next disconnection from the Device and the provided
+/// future (which is wrapped to protect against crash)
+pub async fn monitoring<F: Future + Unpin, C: 'static + Any + Send>(
+    device: &mut Device,
+    f: F
+) -> Result<<F as Future>::Output, Result<(DeviceID, Disconnect), Crash<C>>> {
+    let mut future = DontPanic::new(f);
+    biased_race(
+        async {
+            let update = device.next().await.unwrap();
+            Err(Ok(update))
+        },
+        async {
+            match (&mut future).await {
+                Ok(val) => Ok(val),
+                Err(unwind) => Err(Err(Crash::Panic(unwind))),
+            }
+        }
+    ).await
+}
+
+/// Given a `Device` and an async closure, runs the async closure while
+/// monitoring the `Device` for crashes of any monitored `Device`s.  If
+/// the `Device` (or a `Device` being monitored) crashes, announces that
+/// we have crashed to whoever is monitoring us. If it does not crash,
+/// returns the original Device for reuse along with the closure result.
+pub async fn part_manage<'a, F, T, C>(
+    mut device: Device, mut f: F
+) -> Result<(Device, T), Crash<C>>
+where F: Future<Output=Result<T,C>> + Unpin,
       C: Any + 'static + Send
 {
-    let did = device.device_id();
-    match device.monitoring(f()).await {
-        Ok(val) => {
-            device.plugboard.broadcast(did, Disconnect::Complete).await;
+    loop {
+        match monitoring(&mut device, &mut f).await {
+            Ok(Ok(val)) => { return Ok((device, val)); }
+            Ok(Err(val)) => { return Err(Crash::Fail(val)); }
+            Err(Ok((did, disconnect))) => {
+                if disconnect.crashed() {
+                    device.cascaded(did).await;
+                    return Err(Crash::Cascade(did, disconnect));
+                }
+            }
+            Err(Err(crash)) => {
+                device.disconnect(Disconnect::Crash).await;
+                return Err(crash);
+            }
+        }
+    }
+}
+
+/// Like `part_manage()`, but in the case of success, announces
+/// success and consumes the `Device`.
+pub async fn manage<'a, F, G, C, T>(device: Device, f: F)
+                                    -> Result<T, Crash<C>>
+where F: Future<Output=Result<T,C>> + Unpin,
+      C: Any + 'static + Send
+{
+    match part_manage(device, f).await {
+        Ok((device, val)) => {
+            device.completed().await;
             Ok(val)
         }
-        Err(crash) =>  {
-            device.plugboard.broadcast(did, crash.as_disconnect()).await;
-            Err((did, crash))
-        }
+        Err(e) => Err(e),
     }
 }
 
@@ -213,3 +202,4 @@ pub fn chain_panic_hook() {
         old(info);
     }));
 }
+    

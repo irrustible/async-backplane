@@ -68,9 +68,7 @@ impl<T: 'static + Send> Sending<T> {
     #[allow(unused_must_use)]
     pub fn new(sender: Sender<T>, value: T) -> Sending<T> {
         Sending {
-            inner: Box::pin(async move {
-                sender.send(value).await;
-            }),
+            inner: Box::pin(async move { sender.send(value).await; }),
             _phantom: PhantomData,
         }
     }

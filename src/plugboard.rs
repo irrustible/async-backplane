@@ -5,11 +5,11 @@ use std::convert::TryInto; // turn a usize into a u64
 use std::sync::atomic::{AtomicUsize, spin_loop_hint};
 use rw_lease::{ReadGuard, Blocked, RWLease};
 
-use crate::{DeviceID, Disconnect, Line, LinkError, Pluggable};
+use crate::{DeviceID, Disconnect, Line, LinkError};
 use crate::sending::BulkSend;
 
 #[derive(Clone, Eq, PartialEq)]
-pub enum LineOp {
+pub(crate) enum LineOp {
     Attach(Line),
     Detach(DeviceID),
 }

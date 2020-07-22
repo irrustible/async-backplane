@@ -20,17 +20,14 @@ maybe-unwind = "0.3"
 pin-project-lite = "0.1"
 # primitive_traits = "0.2"
 
-[dependencies.rw_lease]
-path = "../rw_lease"
-# git = "https://github.com/irrustible/rw_lease"
-# branch = "main"
+[dependencies.rw-lease]
+# path = "../rw-lease"
+git = "https://github.com/irrustible/rw-lease"
+branch = "main"
 # version = "0.1"
 default-features = false
 
 [dependencies.smol]
-version = "0.1"
+version = "0.2"
 optional = true
 
-[dev-dependencies]
-futures = "0.3"
-smol = "0.1"
