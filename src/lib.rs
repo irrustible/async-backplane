@@ -1,15 +1,16 @@
 #![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
 
-use maybe_unwind::Unwind;
-
 pub mod utils;
 pub mod panic;
 
 mod plugboard;
 mod device;
 
-pub use anyhow::{anyhow, bail, ensure, Error};
+pub use anyhow::{anyhow as error, bail as crash, ensure, Error};
 pub use device::{Device, Line};
+
+use maybe_unwind::Unwind;
+use std::fmt::Display;
 
 /// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -112,4 +113,13 @@ impl Crash {
             Crash::Cascade(who, _) => Disconnect::Cascade(*who),
         }
     }
+
+    /// If we are an Error, add additional context. Otherwise, do nothing.
+    pub fn context<C>(&mut self, context: C)
+    where C: Display + Send + Sync + 'static {
+        if let Crash::Error(e) = self {
+            *self = Crash::Error(e.context(context));
+        }
+    }
+
 }
