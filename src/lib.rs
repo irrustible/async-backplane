@@ -77,7 +77,7 @@ pub enum Crash<C=Error> {
     Cascade(DeviceID, Disconnect),
 }
 
-impl Crash {
+impl<C> Crash<C> {
     /// is this an unwound panic?
     pub fn is_panic(&self) -> bool {
         if let Crash::Panic(_) = self {
@@ -115,8 +115,8 @@ impl Crash {
     }
 
     /// If we are an Error, add additional context. Otherwise, do nothing.
-    pub fn context<C>(&mut self, context: C)
-    where C: Display + Send + Sync + 'static {
+    pub fn context<Ctx>(&mut self, context: Ctx)
+    where Ctx: Display + Send + Sync + 'static {
         if let Crash::Error(e) = self {
             *self = Crash::Error(e.context(context));
         }

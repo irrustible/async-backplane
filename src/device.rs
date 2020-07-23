@@ -6,7 +6,7 @@ use std::any::Any;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use crate::{Crash, DeviceID, Disconnect, LinkError};
+use crate::{Crash, DeviceID, Disconnect, Error, LinkError};
 use crate::plugboard::Plugboard;
 use crate::utils::{biased_race, DontPanic};
 
@@ -98,10 +98,12 @@ impl Device {
 
     /// Races the next disconnection from the Device and the provided
     /// future (which is wrapped to protect against crash)
-    pub async fn monitoring<F: Future + Unpin, C: 'static + Any + Send>(
+    pub async fn monitoring<F, C=Error>(
         &mut self,
         f: F
-    ) -> Result<<F as Future>::Output, Result<(DeviceID, Disconnect), Crash<C>>> {
+    ) -> Result<<F as Future>::Output, Result<(DeviceID, Disconnect), Crash<C>>>
+    where F: Future + Unpin,
+          C: 'static + Any + Send {
         let mut future = DontPanic::new(f);
         biased_race(
             async {
@@ -122,11 +124,11 @@ impl Device {
     /// the `Device` (or a `Device` being monitored) crashes, announces that
     /// we have crashed to whoever is monitoring us. If it does not crash,
     /// returns the original Device for reuse along with the closure result.
-    pub async fn part_manage<'a, F, C, T>(
+    pub async fn part_manage<'a, F, T, C=Error>(
         mut self, mut f: F
     ) -> Result<(Device, T), Crash<C>>
     where F: Future<Output=Result<T,C>> + Unpin,
-          C: Any + 'static + Send
+          C: 'static + Send
     {
         loop {
             match self.monitoring(&mut f).await {
@@ -149,7 +151,7 @@ impl Device {
     /// Like `part_manage()`, but in the case of success, announces
     /// success and consumes the `Device`.
     pub async fn manage<F, C, T>(self, f: F) -> Result<T, Crash<C>>
-    where F: Future<Output=Result<T,C>> + Unpin, C: Any + 'static + Send {
+    where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
         match self.part_manage(f).await {
             Ok((device, val)) => {
                 device.completed().await;
