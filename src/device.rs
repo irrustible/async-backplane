@@ -15,6 +15,7 @@ use crate::utils::{biased_race, DontPanic};
 pub struct Device {
     pub(crate) plugboard: Arc<Plugboard>,
     pub(crate) disconnects: Receiver<(DeviceID, Disconnect)>,
+    done: bool,
 }
 
 impl Device {
@@ -23,7 +24,7 @@ impl Device {
     pub fn new() -> Self {
         let (send, disconnects) = async_channel::unbounded();
         let plugboard = Arc::new(Plugboard::new(send));
-        Device { disconnects, plugboard }
+        Device { disconnects, plugboard, done: false }
     }
 
     /// Get the ID of the Device on the other end of the Line
@@ -52,8 +53,9 @@ impl Device {
     }
 
     /// Notify our monitors of our disconnect
-    pub async fn disconnect(self, disconnect: Disconnect) {
+    pub async fn disconnect(mut self, disconnect: Disconnect) {
         self.plugboard.broadcast(self.device_id(), disconnect).await;
+        self.done = true;
     }
 
     /// Ask to be notified when the provided Line disconnects
@@ -178,6 +180,27 @@ impl Device {
         let p = process(self);
         Task::spawn(async move { p.await; }).detach();
         line
+    }
+}
+
+#[cfg(feature = "smol")] // Send notifications in the background
+impl Drop for Device {
+    fn drop(&mut self) {
+        if !self.done {
+            let fut = self.plugboard.broadcast(self.device_id(), Disconnect::Crash);
+            Task::spawn(async move { fut.await; }).detach();
+        }
+    }
+}
+
+#[cfg(not(feature = "smol"))] // Block on notifications
+impl Drop for Device {
+    fn drop(&mut self) {
+        use futures_lite::future::block_on;
+        if !self.done {
+            let fut = self.plugboard.broadcast(self.device_id(), Disconnect::Crash);
+            block_on(fut);
+        }
     }
 }
 
