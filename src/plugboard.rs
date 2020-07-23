@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, spin_loop_hint};
 use rw_lease::{ReadGuard, Blocked, RWLease};
 
 use crate::{DeviceID, Disconnect, Line, LinkError};
-use crate::sending::BulkSend;
+use crate::utils::BulkSend;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LineOp {

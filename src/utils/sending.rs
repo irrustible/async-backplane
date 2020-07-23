@@ -56,6 +56,7 @@ type Quiet = Pin<Box<dyn Future<Output = ()> + 'static + Send>>;
 
 #[cfg(not(feature = "nightly"))]
 pin_project! {
+    /// A wrapper for a channel Send future.
     pub struct Sending<T> {
         #[pin]
         inner: Quiet,
@@ -85,6 +86,7 @@ fn quiet<T: 'static + Send>(sender: Sender<T>, value: T) -> Quiet<T> {
 
 #[cfg(feature = "nightly")]
 pin_project! {
+    /// A wrapper for a channel Send future.
     pub struct Sending<T> {
         #[pin]
         inner: Quiet<T>,

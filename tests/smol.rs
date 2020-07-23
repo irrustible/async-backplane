@@ -1,7 +1,7 @@
-// use futures::channel::oneshot::{self, Canceled};
-// use futures::prelude::*;
-// use std::io;
-// use tingle::*;
+// use async_backplane::*;
+// use futures_lite::*;
+// use futures_lite::future::block_on;
+// use std::{io, thread};
 
 // #[cfg(feature = "smol")]
 // #[test]

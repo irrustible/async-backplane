@@ -13,7 +13,7 @@ fn test() {
 
     let t1 = thread::spawn(move || block_on(d2.disconnect(Disconnect::Crash)));
     let t2: thread::JoinHandle<Result<io::Result<()>, Result<(DeviceID, Disconnect), Crash<()>>>> =
-        thread::spawn(move || block_on(monitoring(&mut d1, future::pending::<io::Result<()>>())));
+        thread::spawn(move || block_on(d1.monitoring(future::pending::<io::Result<()>>())));
 
     assert_eq!((), t1.join().unwrap());
 

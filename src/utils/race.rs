@@ -3,6 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+/// Like `futures_lite::future::race` but with a left bias
 pub fn biased_race<T, A, B>(future1: A, future2: B) -> BiasedRace<A, B>
 where
     A: Future<Output = T>,
@@ -12,7 +13,7 @@ where
 }
 
 pin_project! {
-    /// Future for the [`race()`] function.
+    /// Like `futures_lite::future::Race`, but with a left bias
     #[derive(Debug)]
     pub struct BiasedRace<A, B> {
         #[pin]

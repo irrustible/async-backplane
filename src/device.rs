@@ -1,14 +1,16 @@
 #[cfg(feature = "smol")]
 use smol::Task;
 use async_channel::{self, Receiver};
-use futures_lite::{Future, Stream};
+use futures_lite::{Future, Stream, StreamExt};
+use std::any::Any;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use crate::{BulkSend, DeviceID, Disconnect, LinkError};
+use crate::{Crash, DeviceID, Disconnect, LinkError};
 use crate::plugboard::Plugboard;
+use crate::utils::{biased_race, DontPanic};
 
-/// A Device is a computation's connection to the backplane
+/// A Device connects a Future to the backplane.
 #[derive(Debug)]
 pub struct Device {
     pub(crate) plugboard: Arc<Plugboard>,
@@ -30,53 +32,34 @@ impl Device {
     //     Device { disconnects, plugboard }
     // }
 
+    /// Get the ID of the Device on the other end of the Line
+    pub fn device_id(&self) -> DeviceID {
+        DeviceID::new(&*self.plugboard as *const _ as usize)
+    }
+
     /// Opens a line to the Device
     pub fn open_line(&self) -> Line {
         Line { plugboard: self.plugboard.clone() }
     }
 
     /// Notify our monitors that we were successful
-    pub fn completed(self) -> BulkSend<(DeviceID, Disconnect)> {
-        self.disconnect(Disconnect::Complete)
+    pub async fn completed(self) {
+        self.disconnect(Disconnect::Complete).await;
     }
 
     /// Notify our monitors that we crashed
-    pub fn crashed(self) -> BulkSend<(DeviceID, Disconnect)> {
-        self.disconnect(Disconnect::Crash)
+    pub async fn crashed(self) {
+        self.disconnect(Disconnect::Crash).await;
     }
 
     /// Notify our monitors that we cascaded a crash
-    pub fn cascaded(self, did: DeviceID) -> BulkSend<(DeviceID, Disconnect)> {
-        self.disconnect(Disconnect::Cascade(did))
+    pub async fn cascaded(self, did: DeviceID) {
+        self.disconnect(Disconnect::Cascade(did)).await
     }
 
     /// Notify our monitors of our disconnect
-    pub fn disconnect(self, disconnect: Disconnect) -> BulkSend<(DeviceID, Disconnect)> {
-        self.plugboard.broadcast(self.device_id(), disconnect)
-    }
-
-}
-
-#[cfg(feature = "smol")]
-impl Device {
-    pub fn spawn<P, F>(&self, process: P) -> Line
-    where P: FnOnce(Device) -> F,
-          F: 'static + Future + Send
-    {
-        let device = Device::new();
-        let line = device.open_line();
-        let p = process(device);
-        Task::spawn(async move { p.await; }).detach();
-        line
-    }
-}
-
-impl Unpin for Device {}
-
-impl Device {
-    /// Get the ID of the Device on the other end of the Line
-    pub fn device_id(&self) -> DeviceID {
-        DeviceID::new(&*self.plugboard as *const _ as usize)
+    pub async fn disconnect(self, disconnect: Disconnect) {
+        self.plugboard.broadcast(self.device_id(), disconnect).await;
     }
 
     /// Ask to be notified when the provided Line disconnects
@@ -112,7 +95,87 @@ impl Device {
         self.demonitor(line)?;
         Ok(())
     }
+
+    /// Races the next disconnection from the Device and the provided
+    /// future (which is wrapped to protect against crash)
+    pub async fn monitoring<F: Future + Unpin, C: 'static + Any + Send>(
+        &mut self,
+        f: F
+    ) -> Result<<F as Future>::Output, Result<(DeviceID, Disconnect), Crash<C>>> {
+        let mut future = DontPanic::new(f);
+        biased_race(
+            async {
+                let update = self.next().await.unwrap();
+                Err(Ok(update))
+            },
+            async {
+                match (&mut future).await {
+                    Ok(val) => Ok(val),
+                    Err(unwind) => Err(Err(Crash::Panic(unwind))),
+                }
+            }
+        ).await
+    }
+
+    /// Given a `Device` and an async closure, runs the async closure while
+    /// monitoring the `Device` for crashes of any monitored `Device`s.  If
+    /// the `Device` (or a `Device` being monitored) crashes, announces that
+    /// we have crashed to whoever is monitoring us. If it does not crash,
+    /// returns the original Device for reuse along with the closure result.
+    pub async fn part_manage<'a, F, C, T>(
+        mut self, mut f: F
+    ) -> Result<(Device, T), Crash<C>>
+    where F: Future<Output=Result<T,C>> + Unpin,
+          C: Any + 'static + Send
+    {
+        loop {
+            match self.monitoring(&mut f).await {
+                Ok(Ok(val)) => { return Ok((self, val)); }
+                Ok(Err(val)) => { return Err(Crash::Fail(val)); }
+                Err(Ok((did, disconnect))) => {
+                    if disconnect.crashed() {
+                        self.cascaded(did).await;
+                        return Err(Crash::Cascade(did, disconnect));
+                    }
+                }
+                Err(Err(crash)) => {
+                    self.disconnect(Disconnect::Crash).await;
+                    return Err(crash);
+                }
+            }
+        }
+    }
+
+    /// Like `part_manage()`, but in the case of success, announces
+    /// success and consumes the `Device`.
+    pub async fn manage<F, C, T>(self, f: F) -> Result<T, Crash<C>>
+    where F: Future<Output=Result<T,C>> + Unpin, C: Any + 'static + Send {
+        match self.part_manage(f).await {
+            Ok((device, val)) => {
+                device.completed().await;
+                Ok(val)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
 }
+
+#[cfg(feature = "smol")]
+impl Device {
+    /// Note: Requires the 'smol' feature (default enabled)
+    pub fn spawn<P, F>(self, process: P) -> Line
+    where P: FnOnce(Device) -> F,
+          F: 'static + Future + Send
+    {
+        let line = self.open_line();
+        let p = process(self);
+        Task::spawn(async move { p.await; }).detach();
+        line
+    }
+}
+
+impl Unpin for Device {}
 
 impl Stream for Device {
     type Item = (DeviceID, Disconnect);
