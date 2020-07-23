@@ -1,15 +1,16 @@
 #![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
+
+use anyhow::Error;
 use maybe_unwind::Unwind;
-use std::any::Any;
-
-mod plugboard;
-
-mod device;
-pub use device::{Device, Line};
 
 pub mod utils;
-
 pub mod panic;
+
+mod plugboard;
+mod device;
+
+pub use device::{Device, Line};
+
 
 /// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -44,28 +45,39 @@ pub enum Disconnect {
 }
 
 impl Disconnect {
-    /// Whether the disconnect was a successful completion
-    fn completed(&self) -> bool { *self == Disconnect::Complete }
-    /// Whether the disconnect was a crash (or a cascade, which counts)
-    fn crashed(&self) -> bool { !self.completed() }
+
+    /// Whether the disconnect was a successful completion.
+    pub fn is_complete(&self) -> bool { *self == Disconnect::Complete }
+
+    /// Whether the disconnect was a crash.
+    pub fn is_crash(&self) -> bool { *self == Disconnect::Crash }
+
+    /// Whether the disconnect was a cascade.
+    pub fn is_cascade(&self) -> bool {
+        if let Disconnect::Cascade(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+    
+    /// Whether the disconnect was a crash or cascade
+    pub fn is_failure(&self) -> bool { !self.is_complete() }
 }
 
-/// Something we hope to replace very soon.
-pub type FuckingAny = Box<dyn Any + 'static + Send>;
 
 /// Something went wrong with a Device
 #[derive(Debug)]
-pub enum Crash<C=FuckingAny> {
-
-    /// If you installed the panic handler, this will be rich
+pub enum Crash<C=Error> {
+    /// The Device panicked.
     Panic(Unwind),
-    /// Generically, something went wrong
-    Fail(C),
+    /// The Device returned an Err
+    Error(C),
     /// A device we depend upon disconnected
     Cascade(DeviceID, Disconnect),
 }
 
-impl<C> Crash<C> {
+impl Crash {
     /// is this an unwound panic?
     pub fn is_panic(&self) -> bool {
         if let Crash::Panic(_) = self {
@@ -76,8 +88,8 @@ impl<C> Crash<C> {
     }
 
     /// is this the future returning Err?
-    pub fn is_fail(&self) -> bool {
-        if let Crash::Fail(_) = self {
+    pub fn is_error(&self) -> bool {
+        if let Crash::Error(_) = self {
             true
         } else {
             false
@@ -97,20 +109,8 @@ impl<C> Crash<C> {
     pub fn as_disconnect(&self) -> Disconnect {
         match self {
             Crash::Panic(_) => Disconnect::Crash,
-            Crash::Fail(_) => Disconnect::Crash,
+            Crash::Error(_) => Disconnect::Crash,
             Crash::Cascade(who, _) => Disconnect::Cascade(*who),
-        }
-    }
-}
-
-impl<C: 'static + Any + Send> Crash<C> {
-    /// Boxes so you get no useful information whatsoever but the type
-    /// is uniform. I HATE THIS.
-    pub fn boxed(self) -> Crash<FuckingAny> {
-        match self {
-            Crash::Panic(unwind) => Crash::Panic(unwind),
-            Crash::Fail(any) => Crash::Fail(Box::new(any)),
-            Crash::Cascade(did, disco) => Crash::Cascade(did, disco),
         }
     }
 }

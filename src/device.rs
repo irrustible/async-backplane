@@ -131,9 +131,9 @@ impl Device {
         loop {
             match self.monitoring(&mut f).await {
                 Ok(Ok(val)) => { return Ok((self, val)); }
-                Ok(Err(val)) => { return Err(Crash::Fail(val)); }
+                Ok(Err(val)) => { return Err(Crash::Error(val)); }
                 Err(Ok((did, disconnect))) => {
-                    if disconnect.crashed() {
+                    if disconnect.is_failure() {
                         self.cascaded(did).await;
                         return Err(Crash::Cascade(did, disconnect));
                     }

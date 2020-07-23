@@ -11,19 +11,18 @@ default = ["smol"]
 nightly = []
 
 [dependencies]
+anyhow = "1.0.31"
 async-channel = "1.1"
 concurrent-queue = "1.1"
 futures-lite = "0.1.5"
 intmap = "0.7"
 maybe-unwind = "0.3"
-# smallvec = "1.4"
 pin-project-lite = "0.1"
-# primitive_traits = "0.2"
 
 [dependencies.rw-lease]
-path = "../rw-lease"
-# git = "https://github.com/irrustible/rw-lease"
-# branch = "main"
+# path = "../rw-lease"
+git = "https://github.com/irrustible/rw-lease"
+branch = "main"
 # version = "0.1"
 default-features = false
 
