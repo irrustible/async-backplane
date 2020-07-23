@@ -1,11 +1,17 @@
+use maybe_unwind::{maybe_unwind, Unwind};
 use pin_project_lite::pin_project;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::panic::AssertUnwindSafe;
-use maybe_unwind::{maybe_unwind, Unwind};
+
+/// Wraps a Future such that it traps panics
+pub fn dont_panic<F: Future>(f: F) -> DontPanic<F> {
+    DontPanic::new(f) 
+}
+
 pin_project! {
-    /// Wraps a Future such that it traps panics
+    /// Future for `dont_panic()`
     pub struct DontPanic<F: Future> {
         #[pin]
         fut: F,
@@ -13,6 +19,7 @@ pin_project! {
 }
 
 impl<F: Future> DontPanic<F> {
+    /// Creates a new DontPanic wrapping the provided Future
     pub fn new(fut: F) -> Self {
         DontPanic { fut }
     }

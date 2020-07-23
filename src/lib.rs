@@ -9,6 +9,8 @@ pub use device::{Device, Line};
 
 pub mod utils;
 
+pub mod panic;
+
 /// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct DeviceID {
@@ -53,8 +55,8 @@ pub type FuckingAny = Box<dyn Any + 'static + Send>;
 
 /// Something went wrong with a Device
 #[derive(Debug)]
-pub enum Crash<C=FuckingAny>
-where C: 'static + Send {
+pub enum Crash<C=FuckingAny> {
+
     /// If you installed the panic handler, this will be rich
     Panic(Unwind),
     /// Generically, something went wrong
@@ -63,7 +65,8 @@ where C: 'static + Send {
     Cascade(DeviceID, Disconnect),
 }
 
-impl<C: Send> Crash<C> {
+impl<C> Crash<C> {
+    /// is this an unwound panic?
     pub fn is_panic(&self) -> bool {
         if let Crash::Panic(_) = self {
             true
@@ -72,6 +75,7 @@ impl<C: Send> Crash<C> {
         }
     }
 
+    /// is this the future returning Err?
     pub fn is_fail(&self) -> bool {
         if let Crash::Fail(_) = self {
             true
@@ -80,6 +84,7 @@ impl<C: Send> Crash<C> {
         }
     }
 
+    /// is this crash in sympathy with another?
     pub fn is_cascade(&self) -> bool {
         if let Crash::Cascade(_, _) = self {
             true
@@ -87,9 +92,8 @@ impl<C: Send> Crash<C> {
             false
         }
     }
-}
 
-impl<C: Any + 'static + Send> Crash<C> {
+    /// Creates a disconnect representing this Crash.
     pub fn as_disconnect(&self) -> Disconnect {
         match self {
             Crash::Panic(_) => Disconnect::Crash,
@@ -100,6 +104,8 @@ impl<C: Any + 'static + Send> Crash<C> {
 }
 
 impl<C: 'static + Any + Send> Crash<C> {
+    /// Boxes so you get no useful information whatsoever but the type
+    /// is uniform. I HATE THIS.
     pub fn boxed(self) -> Crash<FuckingAny> {
         match self {
             Crash::Panic(unwind) => Crash::Panic(unwind),
@@ -108,9 +114,3 @@ impl<C: 'static + Any + Send> Crash<C> {
         }
     }
 }
-
-// pub trait Reporter {
-//     fn report(&mut self, device: &mut Device, &mut Crash)
-// }
-
-    
