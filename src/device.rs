@@ -26,12 +26,6 @@ impl Device {
         Device { disconnects, plugboard }
     }
 
-    // pub fn new_monitored(by: Line) -> Self {
-    //     let (send, disconnects) = async_channel::unbounded();
-    //     let plugboard = Arc::new(Plugboard::new(send));
-    //     Device { disconnects, plugboard }
-    // }
-
     /// Get the ID of the Device on the other end of the Line
     pub fn device_id(&self) -> DeviceID {
         DeviceID::new(&*self.plugboard as *const _ as usize)

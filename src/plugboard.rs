@@ -21,18 +21,24 @@ pub(crate) struct Plugboard {
 }
 
 impl Plugboard {
+
     pub(crate) fn new(sender: Sender<(DeviceID, Disconnect)>) -> Self {
         let lines = ConcurrentQueue::unbounded();
         let disconnects = RWLease::new(Some(sender));
         Plugboard { lines, disconnects }
     }
+
+    // Record that we wish to notify this Device when we disconnect.
     pub(crate) fn attach(&self, line: Line, error: LinkError) -> Result<(), LinkError> {
         self.lines.push(LineOp::Attach(line)).map_err(|_| error)
     }
+
+    // Record that we no longer wish to notify this Device when we disconnect.
     pub(crate) fn detach(&self, did: DeviceID, error: LinkError) -> Result<(), LinkError> {
         self.lines.push(LineOp::Detach(did)).map_err(|_| error)
     }
-    /// Announce to all our monitors that we are disconnecting
+
+    // Announce to all our monitors that we are disconnecting
     pub(crate) fn broadcast(&self, did: DeviceID, disconnect: Disconnect)
                             -> BulkSend<(DeviceID, Disconnect)>
     {
@@ -74,6 +80,7 @@ impl Plugboard {
         }
     }
 
+    // This is the only place we read on the RWLease.
     fn clone_sender(&self) -> Option<Sender<(DeviceID, Disconnect)>> {
         if let Ok(lock) = self.read_disconnects() {
             if let Some(sender) = &*lock { return Some(sender.clone()); }
@@ -81,7 +88,7 @@ impl Plugboard {
         None
     }
 
-    // spin loop for read access
+    // Spin loop for read access.
     fn read_disconnects<'a>(&'a self) ->
         Result<ReadGuard<'a, Option<Sender<(DeviceID, Disconnect)>>, AtomicUsize>, LinkError>
     {
