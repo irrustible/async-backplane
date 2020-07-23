@@ -114,11 +114,16 @@ impl<C> Crash<C> {
         }
     }
 
+}
+
+impl Crash {
     /// If we are an Error, add additional context. Otherwise, do nothing.
-    pub fn context<Ctx>(&mut self, context: Ctx)
+    pub fn with_context<Ctx>(self, context: Ctx) -> Self
     where Ctx: Display + Send + Sync + 'static {
         if let Crash::Error(e) = self {
-            *self = Crash::Error(e.context(context));
+            Crash::Error(e.context(context))
+        } else {
+            self
         }
     }
 

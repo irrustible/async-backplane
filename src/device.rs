@@ -1,12 +1,12 @@
 #[cfg(feature = "smol")]
 use smol::Task;
-use async_channel::{self, Receiver};
+use async_channel::{self, Receiver, Sender};
 use futures_lite::{Future, Stream, StreamExt};
 use std::any::Any;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use crate::{Crash, DeviceID, Disconnect, Error, LinkError};
+use crate::{Crash, DeviceID, Disconnect, LinkError};
 use crate::plugboard::Plugboard;
 use crate::utils::{biased_race, DontPanic};
 
@@ -98,12 +98,11 @@ impl Device {
 
     /// Races the next disconnection from the Device and the provided
     /// future (which is wrapped to protect against crash)
-    pub async fn monitoring<F, C=Error>(
+    pub async fn monitoring<F, C>(
         &mut self,
         f: F
     ) -> Result<<F as Future>::Output, Result<(DeviceID, Disconnect), Crash<C>>>
-    where F: Future + Unpin,
-          C: 'static + Any + Send {
+    where F: Future + Unpin, C: 'static + Any + Send {
         let mut future = DontPanic::new(f);
         biased_race(
             async {
@@ -119,17 +118,15 @@ impl Device {
         ).await
     }
 
-    /// Given a `Device` and an async closure, runs the async closure while
-    /// monitoring the `Device` for crashes of any monitored `Device`s.  If
-    /// the `Device` (or a `Device` being monitored) crashes, announces that
-    /// we have crashed to whoever is monitoring us. If it does not crash,
-    /// returns the original Device for reuse along with the closure result.
-    pub async fn part_manage<'a, F, T, C=Error>(
+    /// Runs an async closure while monitoring the self for crashes of
+    /// any monitored Devices. If self (or a Device being monitored)
+    /// crashes, announces that we have crashed to whoever is
+    /// monitoring us. If it does not crash, returns the original
+    /// Device for reuse along with the closure result.
+    pub async fn part_manage<'a, F, T, C>(
         mut self, mut f: F
     ) -> Result<(Device, T), Crash<C>>
-    where F: Future<Output=Result<T,C>> + Unpin,
-          C: 'static + Send
-    {
+    where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
         loop {
             match self.monitoring(&mut f).await {
                 Ok(Ok(val)) => { return Ok((self, val)); }
@@ -148,8 +145,8 @@ impl Device {
         }
     }
 
-    /// Like `part_manage()`, but in the case of success, announces
-    /// success and consumes the `Device`.
+    /// Like `part_manage()`, but in the case of successful
+    /// completion, notifiers our monitors and consumes the `Device`.
     pub async fn manage<F, C, T>(self, f: F) -> Result<T, Crash<C>>
     where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
         match self.part_manage(f).await {
@@ -161,10 +158,23 @@ impl Device {
         }
     }
 
+    /// Like `manage()`, but in the case of a crash, reports it to the
+    /// provided Sender instead of returning it.
+    pub async fn fully_manage<F, C, T>(self, sender: Sender<(DeviceID, Crash<C>)>, f: F)
+    where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
+        let id = self.device_id();
+        #[allow(unused_must_use)] // we don't check the Result
+        if let Err(crash) = self.manage(f).await {
+            sender.send((id, crash)).await; // not much to do if it fails
+        }
+    }
+
 }
 
 #[cfg(feature = "smol")]
 impl Device {
+    /// Spawns a computation with the Device on the global executor.
+    ///
     /// Note: Requires the 'smol' feature (default enabled)
     pub fn spawn<P, F>(self, process: P) -> Line
     where P: FnOnce(Device) -> F,
@@ -186,7 +196,8 @@ impl Stream for Device {
     }
 }
 
-/// A reference to a device that allows us to participate in monitoring
+/// A reference to a device that allows us to monitor it, be monitored
+/// by it or link with it (both monitor and be monitored).
 #[derive(Clone, Debug)]
 pub struct Line {
     pub(crate) plugboard: Arc<Plugboard>,
