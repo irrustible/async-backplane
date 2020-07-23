@@ -8,12 +8,13 @@ use rw_lease::{ReadGuard, Blocked, RWLease};
 use crate::{DeviceID, Disconnect, Line, LinkError};
 use crate::sending::BulkSend;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LineOp {
     Attach(Line),
     Detach(DeviceID),
 }
 
+#[derive(Debug)]
 pub(crate) struct Plugboard {
     lines: ConcurrentQueue<LineOp>,
     disconnects: RWLease<Option<Sender<(DeviceID, Disconnect)>>>,

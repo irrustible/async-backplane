@@ -9,6 +9,7 @@ use crate::{BulkSend, DeviceID, Disconnect, LinkError};
 use crate::plugboard::Plugboard;
 
 /// A Device is a computation's connection to the backplane
+#[derive(Debug)]
 pub struct Device {
     pub(crate) plugboard: Arc<Plugboard>,
     pub(crate) disconnects: Receiver<(DeviceID, Disconnect)>,
@@ -121,7 +122,7 @@ impl Stream for Device {
 }
 
 /// A reference to a device that allows us to participate in monitoring
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Line {
     pub(crate) plugboard: Arc<Plugboard>,
 }

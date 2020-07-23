@@ -172,7 +172,7 @@ pub async fn monitoring<F: Future + Unpin, C: 'static + Any + Send>(
 /// the `Device` (or a `Device` being monitored) crashes, announces that
 /// we have crashed to whoever is monitoring us. If it does not crash,
 /// returns the original Device for reuse along with the closure result.
-pub async fn part_manage<'a, F, T, C>(
+pub async fn part_manage<'a, F, C, T>(
     mut device: Device, mut f: F
 ) -> Result<(Device, T), Crash<C>>
 where F: Future<Output=Result<T,C>> + Unpin,
@@ -198,11 +198,8 @@ where F: Future<Output=Result<T,C>> + Unpin,
 
 /// Like `part_manage()`, but in the case of success, announces
 /// success and consumes the `Device`.
-pub async fn manage<'a, F, G, C, T>(device: Device, f: F)
-                                    -> Result<T, Crash<C>>
-where F: Future<Output=Result<T,C>> + Unpin,
-      C: Any + 'static + Send
-{
+pub async fn manage<'a, F, C, T>(device: Device, f: F) -> Result<T, Crash<C>>
+where F: Future<Output=Result<T,C>> + Unpin, C: Any + 'static + Send {
     match part_manage(device, f).await {
         Ok((device, val)) => {
             device.completed().await;
