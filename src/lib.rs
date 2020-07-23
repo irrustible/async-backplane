@@ -1,6 +1,5 @@
 #![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
 
-use anyhow::Error;
 use maybe_unwind::Unwind;
 
 pub mod utils;
@@ -9,8 +8,8 @@ pub mod panic;
 mod plugboard;
 mod device;
 
+pub use anyhow::{anyhow, bail, ensure, Error};
 pub use device::{Device, Line};
-
 
 /// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
