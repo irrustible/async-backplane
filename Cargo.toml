@@ -21,6 +21,6 @@ pin-project-lite = "0.1"
 rw_lease = "0.1.0"
 
 [dependencies.smol]
-version = "0.2"
+version = "0.3"
 optional = true
 
