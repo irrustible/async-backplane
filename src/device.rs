@@ -6,7 +6,7 @@ use std::any::Any;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use crate::{Crash, DeviceID, Disconnect, LinkError};
+use crate::{Crash, DeviceID, Disconnect, Error, LinkError};
 use crate::plugboard::Plugboard;
 use crate::utils::{biased_race, DontPanic};
 
@@ -17,6 +17,15 @@ pub struct Device {
     pub(crate) disconnects: Receiver<(DeviceID, Disconnect)>,
     done: bool,
 }
+
+// The return type of `.monitoring()`
+pub type Watching<T, C=Error> = Result<T, Result<(DeviceID, Disconnect), Crash<C>>>;
+
+// The return type of `.part_manage()`
+pub type PartManaging<T, C=Error> = Result<(Device, T), Crash<C>>;
+
+// The return type of `.manage()`
+pub type Managing<T, C=Error> = Result<T, Crash<C>>;
 
 impl Device {
 
@@ -33,7 +42,7 @@ impl Device {
     }
 
     /// Opens a line to the Device
-    pub fn open_line(&self) -> Line {
+    pub fn line(&self) -> Line {
         Line { plugboard: self.plugboard.clone() }
     }
 
@@ -60,22 +69,38 @@ impl Device {
 
     /// Ask to be notified when the provided Line disconnects
     pub fn monitor(&self, line: Line) -> Result<(), LinkError> {
-        line.plugboard.attach(self.open_line(), LinkError::LinkDown)
+        if self.device_id() != line.device_id() {
+            line.plugboard.attach(self.line(), LinkError::LinkDown)
+        } else {
+            Err(LinkError::CantLinkSelf)
+        }
     }
 
     /// Ask to not be notified when the provided Line disconnects
     pub fn demonitor(&self, line: &Line) -> Result<(), LinkError> {
-        line.plugboard.detach(self.device_id(), LinkError::LinkDown)
+        if self.device_id() != line.device_id() {
+            line.plugboard.detach(self.device_id(), LinkError::LinkDown)
+        } else {
+            Err(LinkError::CantLinkSelf)
+        }
     }
 
     /// Notify the provided Line when we disconnect
     pub fn attach(&self, line: Line) -> Result<(), LinkError> {
-        self.plugboard.attach(line, LinkError::DeviceDown)
+        if self.device_id() != line.device_id() {
+            self.plugboard.attach(line, LinkError::DeviceDown)
+        } else {
+            Err(LinkError::CantLinkSelf)
+        }
     }
 
     /// Undo attach
     pub fn detach(&self, did: DeviceID) -> Result<(), LinkError> {
-        self.plugboard.detach(did, LinkError::DeviceDown)
+        if self.device_id() != did {
+            self.plugboard.detach(did, LinkError::DeviceDown)
+        } else {
+            Err(LinkError::CantLinkSelf)
+        }
     }
 
     /// Monitor + attach
@@ -94,7 +119,7 @@ impl Device {
 
     /// Races the next disconnection from the Device and the provided
     /// future (which is wrapped to protect against crash)
-    pub async fn monitoring<F, C>(
+    pub async fn watch<F, C>(
         &mut self,
         f: F
     ) -> Result<<F as Future>::Output, Result<(DeviceID, Disconnect), Crash<C>>>
@@ -124,7 +149,7 @@ impl Device {
     ) -> Result<(Device, T), Crash<C>>
     where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
         loop {
-            match self.monitoring(&mut f).await {
+            match self.watch(&mut f).await {
                 Ok(Ok(val)) => { return Ok((self, val)); }
                 Ok(Err(val)) => { return Err(Crash::Error(val)); }
                 Err(Ok((did, disconnect))) => {
@@ -176,7 +201,7 @@ impl Device {
     where P: FnOnce(Device) -> F,
           F: 'static + Future + Send
     {
-        let line = self.open_line();
+        let line = self.line();
         let p = process(self);
         Task::spawn(async move { p.await; }).detach();
         line
@@ -228,22 +253,38 @@ impl Line {
 
     /// Ask to be notified when the provided Line disconnects
     pub fn monitor(&self, line: Line) -> Result<(), LinkError> {
-        line.plugboard.attach(self.clone(), LinkError::LinkDown)
+        if self.device_id() != line.device_id() {
+            line.plugboard.attach(self.clone(), LinkError::LinkDown)
+        } else {
+            Err(LinkError::CantLinkSelf)
+        }
     }
 
     /// Ask to not be notified when the provided Line disconnects
     pub fn demonitor(&self, line: &Line) -> Result<(), LinkError> {
-        line.plugboard.detach(self.device_id(), LinkError::LinkDown)
+        if self.device_id() != line.device_id() {
+            line.plugboard.detach(self.device_id(), LinkError::LinkDown)
+        } else {
+            Err(LinkError::CantLinkSelf)
+        }
     }
 
     /// Notify the provided Line when we disconnect
     pub fn attach(&self, line: Line) -> Result<(), LinkError> {
-        self.plugboard.attach(line, LinkError::DeviceDown)
+        if self.device_id() != line.device_id() {
+            self.plugboard.attach(line, LinkError::DeviceDown)
+        } else {
+            Err(LinkError::CantLinkSelf)
+        }
     }
 
     /// Undo attach
     pub fn detach(&self, did: DeviceID) -> Result<(), LinkError> {
-        self.plugboard.detach(did, LinkError::DeviceDown)
+        if self.device_id() != did {
+            self.plugboard.detach(did, LinkError::DeviceDown)
+        } else {
+            Err(LinkError::CantLinkSelf)
+        }
     }
 
     /// Monitor + attach

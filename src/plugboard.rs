@@ -43,7 +43,7 @@ impl Plugboard {
                             -> BulkSend<(DeviceID, Disconnect)>
     {
         // It may take a few moments to drain, so let's kick that off first.
-        let mut drain = self.disconnects.try_write().unwrap();
+        let mut drain = self.disconnects.write().unwrap();
         self.lines.close(); // no point taking any more link requests
         // Now we need to figure out which lines are mapped after
         // executing all the ops left for us
@@ -66,7 +66,7 @@ impl Plugboard {
         }
         // The readers have *probably* drained away by now
         loop { // Danger Will Robinson - will we spin forever?
-            match drain.try_upgrade() {
+            match drain.upgrade() {
                 Ok(mut sender_option) => {
                     #[allow(unused_must_use)]
                     sender_option.take();
@@ -83,7 +83,9 @@ impl Plugboard {
     // This is the only place we read on the RWLease.
     fn clone_sender(&self) -> Option<Sender<(DeviceID, Disconnect)>> {
         if let Ok(lock) = self.read_disconnects() {
-            if let Some(sender) = &*lock { return Some(sender.clone()); }
+            if let Some(sender) = &*lock {
+                return Some(sender.clone());
+            }
         }
         None
     }
@@ -93,7 +95,7 @@ impl Plugboard {
         Result<ReadGuard<'a, Option<Sender<(DeviceID, Disconnect)>>, AtomicUsize>, LinkError>
     {
         loop { // Danger Will Robinson - will we spin forever?
-            match self.disconnects.try_read() {
+            match self.disconnects.read() {
                 // We're in, are we still alive?
                 Ok(read) => { return Ok(read); }
                 // The writer only locks to remove it

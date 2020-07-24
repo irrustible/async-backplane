@@ -7,7 +7,7 @@ mod plugboard;
 mod device;
 
 pub use anyhow::{anyhow as error, bail as crash, ensure, Error};
-pub use device::{Device, Line};
+pub use device::{Device, Line, Managing, PartManaging, Watching};
 
 use maybe_unwind::Unwind;
 use std::fmt::Display;
@@ -25,12 +25,14 @@ impl DeviceID {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
-/// At least one end of the Link is down
+/// There was a problem performing a Link.
 pub enum LinkError {
     /// We can't because we are down
     DeviceDown,
     /// We can't because the other Device is down
     LinkDown,
+    /// We can't link to ourselves
+    CantLinkSelf,
 }
 
 /// The device has dropped off the bus

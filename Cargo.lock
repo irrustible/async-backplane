@@ -17,7 +17,7 @@ dependencies = [
  "intmap",
  "maybe-unwind",
  "pin-project-lite",
- "rw-lease",
+ "rw_lease",
  "smol",
 ]
 
@@ -64,9 +64,9 @@ checksum = "065374052e7df7ee4047b1160cca5e1467a12351a40b3da123c870ba0b8eda2a"
 
 [[package]]
 name = "atomic_prim_traits"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd0aa75c6563140ef108b408c68abd7bfc6f9fe45193b75e9f50dbad536b3e8d"
+checksum = "0e81134b8403479f901fb108e58dece081e3f87bc031e0cfde29e9372ad5557e"
 
 [[package]]
 name = "blocking"
@@ -236,9 +236,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41cc0f7e4d5d4544e8861606a285bb08d3e70712ccc7d2b84d7c0ccfaf4b05ce"
 
 [[package]]
-name = "rw-lease"
+name = "rw_lease"
 version = "0.1.0"
-source = "git+https://github.com/irrustible/rw-lease?branch=main#20b32482a3422e83a0cdcfb4bbc66f93374f83c7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3a354ffb43af5307344d2d3c01569daeeec66cb515ca9fb3b6181d54c4b2611"
 dependencies = [
  "atomic_prim_traits",
  "primitive_traits",

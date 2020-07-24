@@ -18,13 +18,7 @@ futures-lite = "0.1.5"
 intmap = "0.7"
 maybe-unwind = "0.3"
 pin-project-lite = "0.1"
-
-[dependencies.rw-lease]
-# path = "../rw-lease"
-git = "https://github.com/irrustible/rw-lease"
-branch = "main"
-# version = "0.1"
-default-features = false
+rw_lease = "0.1.0"
 
 [dependencies.smol]
 version = "0.2"
