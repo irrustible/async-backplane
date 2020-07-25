@@ -127,7 +127,7 @@ impl Device {
         let mut future = DontPanic::new(f);
         biased_race(
             async {
-                let update = self.next().await.unwrap();
+                let update = self.next().await.expect("The Device to still be usable.");
                 Err(Ok(update))
             },
             async {
@@ -208,17 +208,17 @@ impl Device {
     }
 }
 
-#[cfg(feature = "smol")] // Send notifications in the background
-impl Drop for Device {
-    fn drop(&mut self) {
-        if !self.done {
-            let fut = self.plugboard.broadcast(self.device_id(), Disconnect::Crash);
-            Task::spawn(async move { fut.await; }).detach();
-        }
-    }
-}
+// #[cfg(feature = "smol")] // Send notifications in the background
+// impl Drop for Device {
+//     fn drop(&mut self) {
+//         if !self.done {
+//             let fut = self.plugboard.broadcast(self.device_id(), Disconnect::Crash);
+//             Task::spawn(async move { fut.await; }).detach();
+//         }
+//     }
+// }
 
-#[cfg(not(feature = "smol"))] // Block on notifications
+// #[cfg(not(feature = "smol"))] // Block on notifications
 impl Drop for Device {
     fn drop(&mut self) {
         use futures_lite::future::block_on;
