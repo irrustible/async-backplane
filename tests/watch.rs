@@ -67,7 +67,7 @@ fn monitored_drops() {
 // monitored via attach
 
 #[test]
-fn monitored_succeeds_attach() {
+fn attached_succeeds() {
     let d1 = Device::new();
     let mut d2 = Device::new();
     let i1 = d1.device_id();
@@ -83,7 +83,7 @@ fn monitored_succeeds_attach() {
 }
 
 #[test]
-fn monitored_crashes_attach() {
+fn attached_crashes() {
     let d1 = Device::new();
     let mut d2 = Device::new();
     let i1 = d1.device_id();
@@ -99,7 +99,7 @@ fn monitored_crashes_attach() {
 }
 
 #[test]
-fn monitored_drops_attach() {
+fn attached_drops() {
     let mut d2 = Device::new();
     let i1 = {
         let d1 = Device::new();
