@@ -7,6 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use crate::{Crash, DeviceID, Disconnect, Error, LinkError};
+use crate::linemap::LineMap;
 use crate::plugboard::Plugboard;
 use crate::utils::{biased_race, DontPanic};
 
@@ -15,6 +16,7 @@ use crate::utils::{biased_race, DontPanic};
 pub struct Device {
     pub(crate) plugboard: Arc<Plugboard>,
     pub(crate) disconnects: Receiver<(DeviceID, Disconnect)>,
+    monitors: LineMap,
     done: bool,
 }
 
@@ -33,7 +35,12 @@ impl Device {
     pub fn new() -> Self {
         let (send, disconnects) = async_channel::unbounded();
         let plugboard = Arc::new(Plugboard::new(send));
-        Device { disconnects, plugboard, done: false }
+        Device {
+            disconnects,
+            plugboard,
+            monitors: LineMap::new(),
+            done: false,
+        }
     }
 
     /// Get the ID of the Device on the other end of the Line

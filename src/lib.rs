@@ -5,6 +5,7 @@ pub mod panic;
 
 mod plugboard;
 mod device;
+mod linemap;
 
 pub use anyhow::{anyhow as error, bail as crash, ensure, Error};
 pub use device::{Device, Line, Managing, PartManaging, Watching};
@@ -13,7 +14,7 @@ use maybe_unwind::Unwind;
 use std::fmt::Display;
 
 /// A locally unique identifier for a Device
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct DeviceID {
     pub(crate) inner: usize,
 }

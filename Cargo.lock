@@ -14,7 +14,6 @@ dependencies = [
  "async-channel",
  "concurrent-queue",
  "futures-lite",
- "intmap",
  "maybe-unwind",
  "pin-project-lite",
  "rw_lease",
@@ -175,12 +174,6 @@ checksum = "3deed196b6e7f9e44a2ae8d94225d80302d81208b1bb673fd21fe634645c85a9"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "intmap"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e50930385956f6c4a0b99f3dd654adcc40788456c36e17c5b20e1d1ceb523ec6"
 
 [[package]]
 name = "libc"

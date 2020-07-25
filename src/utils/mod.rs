@@ -3,6 +3,7 @@ mod race;
 mod sending;
 mod dontpanic;
 
-pub use race::{biased_race, BiasedRace};
-pub(crate) use sending::BulkSend;
 pub use dontpanic::{dont_panic, DontPanic};
+pub use race::{biased_race, BiasedRace};
+
+pub(crate) use sending::BulkSend;

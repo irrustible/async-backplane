@@ -1,18 +1,13 @@
 use async_channel::{self, Sender};
 use concurrent_queue::ConcurrentQueue;
-use intmap::IntMap;
 use std::convert::TryInto; // turn a usize into a u64
 use std::sync::atomic::{AtomicUsize, spin_loop_hint};
 use rw_lease::{ReadGuard, Blocked, RWLease};
 
 use crate::{DeviceID, Disconnect, Line, LinkError};
+use crate::linemap::{LineMap, LineOp};
 use crate::utils::BulkSend;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum LineOp {
-    Attach(Line),
-    Detach(DeviceID),
-}
 
 #[derive(Debug)]
 pub(crate) struct Plugboard {
@@ -43,25 +38,21 @@ impl Plugboard {
                             -> BulkSend<(DeviceID, Disconnect)>
     {
         // It may take a few moments to drain, so let's kick that off first.
+
         let mut drain = self.disconnects.write().unwrap();
         self.lines.close(); // no point taking any more link requests
         // Now we need to figure out which lines are mapped after
         // executing all the ops left for us
-        let mut lines = IntMap::new();
+        let mut lines = LineMap::new();
         while let Ok(op) = self.lines.pop() {
-            match op {
-                LineOp::Attach(line) => {
-                    lines.insert(line.device_id().inner.try_into().unwrap(), line);
-                }
-                LineOp::Detach(did) => {
-                    lines.remove(did.inner.try_into().unwrap());
-                }
-            }
+            lines.apply(op);
         }
         let mut bulk = BulkSend::new((did, disconnect));
-        for (_, line) in lines.drain() {
-            if let Some(sender) = line.plugboard.clone_sender() {
-                bulk.add_sender(sender)
+        for (_, maybe) in lines.drain() {
+            if let Some(line) = maybe {
+                if let Some(sender) = line.plugboard.clone_sender() {
+                    bulk.add_sender(sender)
+                }
             }
         }
         // The readers have *probably* drained away by now
@@ -90,11 +81,11 @@ impl Plugboard {
         None
     }
 
-    // Spin loop for read access.
+    // Attempt to obtain read access to the channel of disconnects
     fn read_disconnects<'a>(&'a self) ->
         Result<ReadGuard<'a, Option<Sender<(DeviceID, Disconnect)>>, AtomicUsize>, LinkError>
     {
-        loop { // Danger Will Robinson - will we spin forever?
+        loop { // Eh, how many readers can there be?
             match self.disconnects.read() {
                 // We're in, are we still alive?
                 Ok(read) => { return Ok(read); }
