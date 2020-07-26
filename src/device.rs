@@ -270,22 +270,28 @@ impl Line {
     }
 
     pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
-        if mode.monitor() {
-            other.plugboard.plug(self.clone(), LinkError::LinkDown)?;
+        if self.device_id() != other.device_id() {
+            if mode.monitor() {
+                other.plugboard.plug(self.clone(), LinkError::LinkDown)?;
+            }
+            if mode.notify() {
+                self.plugboard.plug(other, LinkError::DeviceDown)?;
+            }
+            Ok(())
+        } else {
+            Err(LinkError::CantLinkSelf)
         }
-        if mode.notify() {
-            self.plugboard.plug(other, LinkError::DeviceDown)?;
-        }
-        Ok(())
     }
 
     #[allow(unused_must_use)]
     pub fn unlink_line(&self, other: &Line, mode: LinkMode) {
-        if mode.monitor() {
-            other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
-        }
-        if mode.notify() {
-            self.plugboard.unplug(other.device_id(), LinkError::DeviceDown);
+        if self.device_id() != other.device_id() {
+            if mode.monitor() {
+                other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
+            }
+            if mode.notify() {
+                self.plugboard.unplug(other.device_id(), LinkError::DeviceDown);
+            }
         }
     }
 }
