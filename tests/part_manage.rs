@@ -7,193 +7,250 @@ fn solo_succeeds() {
 
     let d1 = Device::new();
     let did = d1.device_id();
-    let t1: JoinHandle<PartManaging<()>> =
+    let t1: JoinHandle<PartManage<()>> =
         spawn(move || block_on(d1.part_manage(ready(Ok(())))));
     let (d2, ret) = t1.join().unwrap().expect("success");
     assert_eq!(did, d2.device_id());
     assert_eq!(ret, ());
 }
 
-// monitored via monitor
+// monitored
 
 #[test]
-fn monitored_succeeds() {
-    let d1 = Device::new();
-    let d2 = Device::new();
-    let did = d2.device_id();
-    let l1 = d1.line();
-    d2.monitor(l1).expect("failed monitoring");
+fn monitored_device_succeeds() {
+    let mut d1 = Device::new();
+    let mut d2 = Device::new();
+    let device_id = d2.device_id();
+    d2.link(&mut d1, LinkMode::Monitor);
 
-    let t1 = spawn(move || block_on(d1.completed()));
+    let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
 
-    let t2: JoinHandle<PartManaging<()>> =
+    let t2: JoinHandle<PartManage<()>> =
         spawn(move || block_on(d2.part_manage(ready(Ok(())))));
-    let (d3, ret) = t2.join().unwrap().expect("success");
-    assert_eq!(ret, ());
-    assert_eq!(d3.device_id(), did);
+    let (d3, result) = t2.join().unwrap().expect("success");
+    assert_eq!(d3.device_id(), device_id);
+    assert_eq!(result, ());
 }
 
 #[test]
-fn monitored_crashes() {
-    let d1 = Device::new();
-    let d2 = Device::new();
-    let i1 = d1.device_id();
-    let l1 = d1.line();
-    d2.monitor(l1).expect("failed monitoring");
-    let t1 = spawn(move || block_on(d1.crashed()));
-    let t2: JoinHandle<PartManaging<()>> =
+fn monitored_device_errors() {
+    let mut d1 = Device::new();
+    let mut d2 = Device::new();
+    let device_id = d1.device_id();
+    d2.link(&mut d1, LinkMode::Monitor);
+    let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
+    let t2: JoinHandle<PartManage<()>> =
         spawn(move || block_on(d2.part_manage(pending())));
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, disco) = crash {
-        assert_eq!(i1, did);
-        assert!(disco.is_crash());
+    if let Crash::Cascade(report) = crash {
+        assert_eq!(device_id, report.device_id);
+        assert!(report.result.is_error());
     } else {
         unreachable!();
     }
 }
 
 #[test]
-fn monitored_drops() {
-    let d2 = Device::new();
-    let i1 = {
-        let d1 = Device::new();
-        let i1 = d1.device_id();
-        let l1 = d1.line();
-        d2.monitor(l1).expect("failed monitoring");
-        i1
+fn monitored_device_drops() {
+    let mut d2 = Device::new();
+    let device_id = {
+        let mut d1 = Device::new();
+        let id = d1.device_id();
+        d2.link(&mut d1, LinkMode::Monitor);
+        id
     };
-    let t: JoinHandle<PartManaging<()>> =
+    let t: JoinHandle<PartManage<()>> =
         spawn(move || block_on(d2.part_manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, disco) = crash {
-        assert_eq!(i1, did);
-        assert!(disco.is_crash());
+    if let Crash::Cascade(report) = crash {
+        assert_eq!(report.device_id, device_id);
+        assert!(report.result.is_error());
     } else {
         unreachable!();
     }
 }
 
-// monitored via attach
-
 #[test]
-fn attached_succeeds() {
-    let d1 = Device::new();
-    let d2 = Device::new();
-    let did = d2.device_id();
-    let l2 = d2.line();
-    d1.attach(l2).expect("failed monitoring");
+fn peer_device_succeeds() {
+    let mut d1 = Device::new();
+    let mut d2 = Device::new();
+    let device_id = d2.device_id();
+    d1.link(&mut d2, LinkMode::Peer);
 
-    let t1 = spawn(move || block_on(d1.completed()));
+    let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
 
-    let t2: JoinHandle<PartManaging<()>> =
+    let t2: JoinHandle<PartManage<()>> =
         spawn(move || block_on(d2.part_manage(ready(Ok(())))));
-    let (d3, ret) = t2.join().unwrap().expect("success");
-    assert_eq!(ret, ());
-    assert_eq!(d3.device_id(), did);
+    let (d3, result) = t2.join().unwrap().expect("success");
+    assert_eq!(d3.device_id(), device_id);
+    assert_eq!(result, ());
 }
 
-#[test]
-fn attached_crashes() {
-    let d1 = Device::new();
-    let d2 = Device::new();
-    let i1 = d1.device_id();
-    let l2 = d2.line();
-    d1.attach(l2).expect("failed monitoring");
-    let t1 = spawn(move || block_on(d1.crashed()));
-    let t2: JoinHandle<PartManaging<()>> = spawn(move || block_on(d2.part_manage(pending())));
-    assert_eq!((), t1.join().unwrap());
-    let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, disco) = crash {
-        assert_eq!(i1, did);
-        assert!(disco.is_crash());
-    } else {
-        unreachable!();
-    }
-}
 
 #[test]
-fn attached_drops() {
-    let d2 = Device::new();
-    let i1 = {
-        let d1 = Device::new();
-        let i1 = d1.device_id();
-        let l2 = d2.line();
-        d1.attach(l2).expect("failed monitoring");
-        i1
-    };
-    let t: JoinHandle<PartManaging<()>> =
-        spawn(move || block_on(d2.part_manage(pending())));
-    let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, disco) = crash {
-        assert_eq!(i1, did);
-        assert!(disco.is_crash());
-    } else {
-        unreachable!();
-    }
-}
+fn peer_device_crashes() {
 
-// linked
+    let mut d1 = Device::new();
+    let mut d2 = Device::new();
+    let device_id = d2.device_id();
 
-#[test]
-fn linked_succeeds() {
-    let d1 = Device::new();
-    let d2 = Device::new();
-    let did = d2.device_id();
-    let l2 = d2.line();
-    d1.link(l2).expect("failed monitoring");
+    d1.link(&mut d2, LinkMode::Peer);
 
-    let t1 = spawn(move || block_on(d1.completed()));
-    assert_eq!((), t1.join().unwrap());
-
-    let t2: JoinHandle<PartManaging<()>> =
-        spawn(move || block_on(d2.part_manage(ready(Ok(())))));
-    let (d3, ret) = t2.join().unwrap().expect("success");
-    assert_eq!(ret, ());
-    assert_eq!(d3.device_id(), did);
-}
-
-#[test]
-fn linked_crashes() {
-
-    let d1 = Device::new();
-    let d2 = Device::new();
-    let i2 = d2.device_id();
-
-    d1.link(d2.line()).expect("failed linking");
-
-    let t1 = spawn(move || block_on(d2.crashed()));
-    let t2: JoinHandle<PartManaging<()>> =
+    let t1 = spawn(move || d2.disconnect(Some(Fault::Error)));
+    let t2: JoinHandle<PartManage<()>> =
         spawn(move || block_on(d1.part_manage(pending())));
 
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, disco) = crash {
-        assert_eq!(i2, did);
-        assert!(disco.is_crash());
+    if let Crash::Cascade(report) = crash {
+        assert_eq!(report.device_id, device_id);
+        assert!(report.result.is_error());
     } else {
         unreachable!();
     }
 }
 
 #[test]
-fn linked_drops() {
+fn peer_device_drops() {
 
-    let d1 = Device::new();
-    let did = { // d2 won't survive this block
-        let d2 = Device::new();
-        d1.link(d2.line()).expect("failed linking");
+    let mut d1 = Device::new();
+    let device_id = { // d2 won't survive this block
+        let mut d2 = Device::new();
+        d1.link(&mut d2, LinkMode::Peer);
         d2.device_id()
     };
 
-    let t: JoinHandle<PartManaging<()>> =
+    let t: JoinHandle<PartManage<()>> =
         spawn(move || block_on(d1.part_manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did2, disco) = crash {
-        assert_eq!(did, did2);
-        assert!(disco.is_crash());
+    if let Crash::Cascade(report) = crash {
+        assert_eq!(report.device_id, device_id);
+        assert!(report.result.is_error());
+    } else {
+        unreachable!();
+    }
+}
+
+#[test]
+fn monitored_line_succeeds() {
+    let d1 = Device::new();
+    let mut d2 = Device::new();
+    let device_id = d1.device_id();
+    let line = d1.line();
+    d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
+
+    let t1 = spawn(move || d1.disconnect(None));
+    assert_eq!((), t1.join().unwrap());
+
+    let t2: JoinHandle<PartManage<()>> =
+        spawn(move || block_on(d2.part_manage(ready(Ok(())))));
+    let (d3, result) = t2.join().unwrap().expect("success");
+    assert_eq!(d3.device_id(), device_id);
+    assert_eq!(result, ());
+}
+
+#[test]
+fn monitored_line_errors() {
+    let d1 = Device::new();
+    let mut d2 = Device::new();
+    let device_id = d1.device_id();
+    let line = d2.line();
+    d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
+    let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
+    let t2: JoinHandle<PartManage<()>> =
+        spawn(move || block_on(d2.part_manage(pending())));
+    assert_eq!((), t1.join().unwrap());
+    let crash = t2.join().unwrap().unwrap_err();
+    if let Crash::Cascade(report) = crash {
+        assert_eq!(report.device_id, device_id);
+        assert!(report.result.is_error());
+    } else {
+        unreachable!();
+    }
+}
+
+#[test]
+fn monitored_line_drops() {
+    let mut d2 = Device::new();
+    let device_id = {
+        let d1 = Device::new();
+        let id = d1.device_id();
+        let line = d1.line();
+        d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
+        id
+    };
+    let t: JoinHandle<PartManage<()>> =
+        spawn(move || block_on(d2.part_manage(pending())));
+    let crash = t.join().unwrap().unwrap_err();
+    if let Crash::Cascade(report) = crash {
+        assert_eq!(report.device_id, device_id);
+        assert!(report.result.is_error());
+    } else {
+        unreachable!();
+    }
+}
+
+#[test]
+fn peer_line_succeeds() {
+    let mut d1 = Device::new();
+    let d2 = Device::new();
+    let device_id = d1.device_id();
+    let line = d2.line();
+    d1.link_line(line, LinkMode::Peer).expect("to link successfully");
+
+    let t1 = spawn(move || d1.disconnect(None));
+    assert_eq!((), t1.join().unwrap());
+
+    let t2: JoinHandle<PartManage<()>> =
+        spawn(move || block_on(d2.part_manage(ready(Ok(())))));
+    let (d3, result) = t2.join().unwrap().expect("success");
+    assert_eq!(d3.device_id(), device_id);
+    assert_eq!(result, ());
+}
+
+#[test]
+fn peer_line_crashes() {
+
+    let mut d1 = Device::new();
+    let d2 = Device::new();
+    let device_id = d2.device_id();
+    let line = d2.line();
+    d1.link_line(line, LinkMode::Peer).expect("to link successfully");
+
+    let t1 = spawn(move || d2.disconnect(Some(Fault::Error)));
+    let t2: JoinHandle<PartManage<()>> =
+        spawn(move || block_on(d1.part_manage(pending())));
+
+    assert_eq!((), t1.join().unwrap());
+    let crash = t2.join().unwrap().unwrap_err();
+    if let Crash::Cascade(report) = crash {
+        assert_eq!(report.device_id, device_id);
+        assert!(report.result.is_error());
+    } else {
+        unreachable!();
+    }
+}
+
+#[test]
+fn peer_line_drops() {
+
+    let mut d1 = Device::new();
+    let device_id = { // d2 won't survive this block
+        let d2 = Device::new();
+        let line = d2.line();
+        d1.link_line(line, LinkMode::Peer).expect("to link successfully");
+        d2.device_id()
+    };
+
+    let t: JoinHandle<PartManage<()>> =
+        spawn(move || block_on(d1.part_manage(pending())));
+    let crash = t.join().unwrap().unwrap_err();
+    if let Crash::Cascade(report) = crash {
+        assert_eq!(report.device_id, device_id);
+        assert!(report.result.is_error());
     } else {
         unreachable!();
     }
