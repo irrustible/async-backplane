@@ -11,7 +11,7 @@ name = "async-backplane"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channel",
+ "atomic-waker",
  "concurrent-queue",
  "futures-lite",
  "maybe-unwind",

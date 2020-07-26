@@ -8,10 +8,16 @@ mod device;
 mod linemap;
 
 pub use anyhow::{anyhow as error, bail as crash, ensure, Error};
-pub use device::{Device, Line, Managing, PartManaging, Watching};
+pub use device::{Device, Line, Manage, PartManage, Watch};
 
 use maybe_unwind::Unwind;
 use std::fmt::Display;
+
+/// Like 'Result', but with no semantic meaning
+pub enum Or<L, R> {
+    Left(L),
+    Right(R),
+}
 
 /// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -25,6 +31,36 @@ impl DeviceID {
     }
 }
 
+#[derive(Debug)]
+pub struct Report<T> {
+    pub device_id: DeviceID,
+    pub result: T,
+}
+
+impl<T> Report<T> {
+    pub fn new(device_id : DeviceID, result: T) -> Report<T> {
+        Report { device_id, result }
+    }
+}
+
+impl<T: Clone> Clone for Report<T> {
+    fn clone(&self) -> Report<T> {
+        Report {
+            device_id: self.device_id,
+            result: self.result.clone(),
+        }
+    }
+}
+
+impl<T: PartialEq> PartialEq for Report<T> {
+    fn eq(&self, other: &Self) -> bool {
+        (self.device_id == other.device_id) &&
+            (self.result == other.result)
+    }
+}
+
+impl<T: Eq> Eq for Report<T> {}
+
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 /// There was a problem performing a Link.
 pub enum LinkError {
@@ -36,38 +72,57 @@ pub enum LinkError {
     CantLinkSelf,
 }
 
-/// The device has dropped off the bus
+/// The device has dropped off the backplane unexpectedly
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Disconnect {
-    /// Success!
-    Complete,
+pub enum Fault {
+    /// Wasn't scheduled on an executor
+    Drop,
     /// The device errored
-    Crash,
+    Error,
     /// A device we depended on errored
     Cascade(DeviceID),
 }
 
-impl Disconnect {
-
-    /// Whether the disconnect was a successful completion.
-    pub fn is_complete(&self) -> bool { *self == Disconnect::Complete }
+impl Fault {
 
     /// Whether the disconnect was a crash.
-    pub fn is_crash(&self) -> bool { *self == Disconnect::Crash }
+    pub fn is_drop(&self) -> bool { *self == Fault::Drop }
+
+    /// Whether the disconnect was a crash.
+    pub fn is_error(&self) -> bool { *self == Fault::Error }
 
     /// Whether the disconnect was a cascade.
     pub fn is_cascade(&self) -> bool {
-        if let Disconnect::Cascade(_) = self {
+        if let Fault::Cascade(_) = self {
             true
         } else {
             false
         }
     }
     
-    /// Whether the disconnect was a crash or cascade
-    pub fn is_failure(&self) -> bool { !self.is_complete() }
 }
 
+#[derive(Copy, Clone)]
+#[repr(u32)]
+pub enum LinkMode {
+    Monitor = 0b01,
+    Notify  = 0b10,
+    Peer    = 0b11,
+}
+
+impl LinkMode {
+    pub fn monitor(&self) -> bool {
+        LinkMode::Monitor as u32 == ((*self) as u32 & LinkMode::Monitor as u32)
+    }
+    pub fn notify(&self) -> bool {
+        LinkMode::Notify as u32 == ((*self) as u32 & LinkMode::Notify as u32)
+    }
+    pub fn peer(&self) -> bool {
+        LinkMode::Peer as u32 == ((*self) as u32 & LinkMode::Peer as u32)
+    }
+}
+
+type Disconnect = Report<Option<Fault>>;
 
 /// Something went wrong with a Device
 #[derive(Debug)]
@@ -77,7 +132,7 @@ pub enum Crash<C=Error> {
     /// The Device returned an Err
     Error(C),
     /// A device we depend upon disconnected
-    Cascade(DeviceID, Disconnect),
+    Cascade(Report<Fault>),
 }
 
 impl<C> Crash<C> {
@@ -101,7 +156,7 @@ impl<C> Crash<C> {
 
     /// is this crash in sympathy with another?
     pub fn is_cascade(&self) -> bool {
-        if let Crash::Cascade(_, _) = self {
+        if let Crash::Cascade(_) = self {
             true
         } else {
             false
@@ -109,11 +164,11 @@ impl<C> Crash<C> {
     }
 
     /// Creates a disconnect representing this Crash.
-    pub fn as_disconnect(&self) -> Disconnect {
+    pub fn as_disconnect(&self) -> Fault {
         match self {
-            Crash::Panic(_) => Disconnect::Crash,
-            Crash::Error(_) => Disconnect::Crash,
-            Crash::Cascade(who, _) => Disconnect::Cascade(*who),
+            Crash::Panic(_) => Fault::Error,
+            Crash::Error(_) => Fault::Error,
+            Crash::Cascade(report) => Fault::Cascade(report.device_id),
         }
     }
 

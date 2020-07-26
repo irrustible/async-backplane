@@ -1,12 +1,12 @@
 #[cfg(feature = "smol")]
 use smol::Task;
-use async_channel::{self, Receiver, Sender};
+use concurrent_queue::PopError;
 use futures_lite::{Future, Stream, StreamExt};
 use std::any::Any;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use crate::{Crash, DeviceID, Disconnect, Error, LinkError};
+use crate::{Crash, DeviceID, Disconnect, Fault, Error, LinkError, LinkMode, Or, Report};
 use crate::linemap::LineMap;
 use crate::plugboard::Plugboard;
 use crate::utils::{biased_race, DontPanic};
@@ -15,31 +15,39 @@ use crate::utils::{biased_race, DontPanic};
 #[derive(Debug)]
 pub struct Device {
     pub(crate) plugboard: Arc<Plugboard>,
-    pub(crate) disconnects: Receiver<(DeviceID, Disconnect)>,
-    monitors: LineMap,
-    done: bool,
+    out: LineMap,
+    state: State,
 }
 
-// The return type of `.monitoring()`
-pub type Watching<T, C=Error> = Result<T, Result<(DeviceID, Disconnect), Crash<C>>>;
+// The return type of `.watch()`
+pub type Watch<T, C=Error> = Result<Or<T, Disconnect>, Crash<C>>;
 
 // The return type of `.part_manage()`
-pub type PartManaging<T, C=Error> = Result<(Device, T), Crash<C>>;
+pub type PartManage<T, C=Error> = Result<(Device, T), Crash<C>>;
 
 // The return type of `.manage()`
-pub type Managing<T, C=Error> = Result<T, Crash<C>>;
+pub type Manage<T, C=Error> = Result<T, Crash<C>>;
+
+
+#[derive(Debug, Eq, PartialEq)]
+enum State {
+    New,
+    Dirty,
+    Done,
+}
+
+impl State {
+    fn is_new(&self) -> bool { *self == State::New }
+}
 
 impl Device {
 
     /// Creates a new Device
     pub fn new() -> Self {
-        let (send, disconnects) = async_channel::unbounded();
-        let plugboard = Arc::new(Plugboard::new(send));
         Device {
-            disconnects,
-            plugboard,
-            monitors: LineMap::new(),
-            done: false,
+            plugboard: Arc::new(Plugboard::new()),
+            out: LineMap::new(),
+            state: State::New,
         }
     }
 
@@ -53,75 +61,63 @@ impl Device {
         Line { plugboard: self.plugboard.clone() }
     }
 
-    /// Notify our monitors that we were successful
-    pub async fn completed(self) {
-        self.disconnect(Disconnect::Complete).await;
+    /// Notify our peers we're disconnecting
+    pub fn disconnect(mut self, fault: Option<Fault>) {
+        self.plugboard.close(); // no more requests
+        while let Ok(op) = self.plugboard.line_ops.pop() { self.out.apply(op); } // sync
+        self.report(Report::new(self.device_id(), fault));
+        self.state = State::Done;
     }
 
-    /// Notify our monitors that we crashed
-    pub async fn crashed(self) {
-        self.disconnect(Disconnect::Crash).await;
-    }
-
-    /// Notify our monitors that we cascaded a crash
-    pub async fn cascaded(self, did: DeviceID) {
-        self.disconnect(Disconnect::Cascade(did)).await
-    }
-
-    /// Notify our monitors of our disconnect
-    pub async fn disconnect(mut self, disconnect: Disconnect) {
-        self.plugboard.broadcast(self.device_id(), disconnect).await;
-        self.done = true;
-    }
-
-    /// Ask to be notified when the provided Line disconnects
-    pub fn monitor(&self, line: Line) -> Result<(), LinkError> {
-        if self.device_id() != line.device_id() {
-            line.plugboard.attach(self.line(), LinkError::LinkDown)
-        } else {
-            Err(LinkError::CantLinkSelf)
+    // Actually send all the messages
+    fn report(&mut self, report: Report<Option<Fault>>) {
+        let mut last: Option<Report<Option<Fault>>> = None; // avoid copying
+        for (_, maybe) in self.out.drain() {
+            if let Some(line) = maybe {
+                let r = last.take().unwrap_or_else(|| report.clone());
+                if let Err(e) = line.report(r) {
+                    last = Some(e);
+                }
+            }
         }
     }
 
-    /// Ask to not be notified when the provided Line disconnects
-    pub fn demonitor(&self, line: &Line) -> Result<(), LinkError> {
-        if self.device_id() != line.device_id() {
-            line.plugboard.detach(self.device_id(), LinkError::LinkDown)
-        } else {
-            Err(LinkError::CantLinkSelf)
+    pub fn link(&mut self, other: &mut Device, mode: LinkMode) {
+        if mode.monitor() {
+            other.out.attach(Line { plugboard: self.plugboard.clone() });
+        }
+        if mode.notify() {
+            self.out.attach(Line { plugboard: other.plugboard.clone() });
         }
     }
 
-    /// Notify the provided Line when we disconnect
-    pub fn attach(&self, line: Line) -> Result<(), LinkError> {
-        if self.device_id() != line.device_id() {
-            self.plugboard.attach(line, LinkError::DeviceDown)
-        } else {
-            Err(LinkError::CantLinkSelf)
+    pub fn unlink(&mut self, other: &mut Device, mode: LinkMode) {
+        if mode.monitor() {
+            other.out.detach(self.device_id());
+        }
+        if mode.notify() {
+            self.out.detach(other.device_id());
         }
     }
-
-    /// Undo attach
-    pub fn detach(&self, did: DeviceID) -> Result<(), LinkError> {
-        if self.device_id() != did {
-            self.plugboard.detach(did, LinkError::DeviceDown)
-        } else {
-            Err(LinkError::CantLinkSelf)
+   
+    pub fn link_line(&mut self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
+        if mode.monitor() {
+            other.plugboard.plug(self.line(), LinkError::LinkDown)?;
         }
-    }
-
-    /// Monitor + attach
-    pub fn link(&self, line: Line) -> Result<(), LinkError> {
-        self.monitor(line.clone())?;
-        self.attach(line)?;
+        if mode.notify() {
+            self.out.attach(other);
+        }
         Ok(())
     }
 
-    /// Undo link
-    pub fn unlink(&self, line: &Line) -> Result<(), LinkError> {
-        self.detach(line.device_id())?;
-        self.demonitor(line)?;
-        Ok(())
+    #[allow(unused_must_use)]
+    pub fn unlink_line(&mut self, other: &Line, mode: LinkMode) {
+        if mode.monitor() {
+            other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
+        }
+        if mode.notify() {
+            self.out.detach(other.device_id());
+        }
     }
 
     /// Races the next disconnection from the Device and the provided
@@ -129,18 +125,18 @@ impl Device {
     pub async fn watch<F, C>(
         &mut self,
         f: F
-    ) -> Result<<F as Future>::Output, Result<(DeviceID, Disconnect), Crash<C>>>
+    ) -> Watch<<F as Future>::Output, C>
     where F: Future + Unpin, C: 'static + Any + Send {
         let mut future = DontPanic::new(f);
         biased_race(
             async {
                 let update = self.next().await.expect("The Device to still be usable.");
-                Err(Ok(update))
+                Ok(Or::Right(update))
             },
             async {
                 match (&mut future).await {
-                    Ok(val) => Ok(val),
-                    Err(unwind) => Err(Err(Crash::Panic(unwind))),
+                    Ok(val) => Ok(Or::Left(val)),
+                    Err(unwind) => Err(Crash::Panic(unwind)),
                 }
             }
         ).await
@@ -153,20 +149,23 @@ impl Device {
     /// Device for reuse along with the closure result.
     pub async fn part_manage<'a, F, T, C>(
         mut self, mut f: F
-    ) -> Result<(Device, T), Crash<C>>
+    ) -> PartManage<T, C>
     where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
         loop {
             match self.watch(&mut f).await {
-                Ok(Ok(val)) => { return Ok((self, val)); }
-                Ok(Err(val)) => { return Err(Crash::Error(val)); }
-                Err(Ok((did, disconnect))) => {
-                    if disconnect.is_failure() {
-                        self.cascaded(did).await;
-                        return Err(Crash::Cascade(did, disconnect));
+                Ok(Or::Left(Ok(val))) => { return Ok((self, val)); }
+                Ok(Or::Right(disco)) => {
+                    if let Some(fault) = disco.result {
+                        self.disconnect(Some(Fault::Cascade(disco.device_id)));
+                        return Err(Crash::Cascade(Report::new(disco.device_id, fault)));
                     }
                 }
-                Err(Err(crash)) => {
-                    self.disconnect(Disconnect::Crash).await;
+                Ok(Or::Left(Err(val))) => {
+                    self.disconnect(Some(Fault::Error));
+                    return Err(Crash::Error(val));
+                }
+                Err(crash) => {
+                    self.disconnect(Some(Fault::Error));
                     return Err(crash);
                 }
             }
@@ -174,28 +173,28 @@ impl Device {
     }
 
     /// Like `part_manage()`, but in the case of successful
-    /// completion, notifiers our monitors and consumes the `Device`.
+    /// completion, notifies our monitors and consumes self
     pub async fn manage<F, C, T>(self, f: F) -> Result<T, Crash<C>>
     where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
         match self.part_manage(f).await {
             Ok((device, val)) => {
-                device.completed().await;
+                device.disconnect(None);
                 Ok(val)
             }
             Err(e) => Err(e),
         }
     }
 
-    /// Like `manage()`, but in the case of a crash, reports it to the
-    /// provided Sender instead of returning it.
-    pub async fn fully_manage<F, C, T>(self, sender: Sender<(DeviceID, Crash<C>)>, f: F)
-    where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
-        let id = self.device_id();
-        #[allow(unused_must_use)] // we don't check the Result
-        if let Err(crash) = self.manage(f).await {
-            sender.send((id, crash)).await; // not much to do if it fails
-        }
-    }
+    // /// Like `manage()`, but in the case of a crash, reports it to the
+    // /// provided Sender instead of returning it.
+    // pub async fn fully_manage<F, C, T>(self, sender: Sender<Report<Crash<C>>>, f: F)
+    // where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
+    //     let id = self.device_id();
+    //     #[allow(unused_must_use)] // we don't check the Result
+    //     if let Err(crash) = self.manage(f).await {
+    //         sender.send(Report::new(id, crash));
+    //     }
+    // }
 
 }
 
@@ -215,23 +214,12 @@ impl Device {
     }
 }
 
-// #[cfg(feature = "smol")] // Send notifications in the background
-// impl Drop for Device {
-//     fn drop(&mut self) {
-//         if !self.done {
-//             let fut = self.plugboard.broadcast(self.device_id(), Disconnect::Crash);
-//             Task::spawn(async move { fut.await; }).detach();
-//         }
-//     }
-// }
-
-// #[cfg(not(feature = "smol"))] // Block on notifications
 impl Drop for Device {
     fn drop(&mut self) {
-        use futures_lite::future::block_on;
-        if !self.done {
-            let fut = self.plugboard.broadcast(self.device_id(), Disconnect::Crash);
-            block_on(fut);
+        if self.state != State::Done {
+            self.plugboard.close(); // no more requests
+            while let Ok(op) = self.plugboard.line_ops.pop() { self.out.apply(op); } // sync
+            self.report(Report::new(self.device_id(), Some(Fault::Drop)));
         }
     }
 }
@@ -239,9 +227,27 @@ impl Drop for Device {
 impl Unpin for Device {}
 
 impl Stream for Device {
-    type Item = (DeviceID, Disconnect);
+    type Item = Disconnect;
     fn poll_next(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Option<Self::Item>> {
-        Receiver::poll_next(Pin::new(&mut Pin::into_inner(self).disconnects), ctx)
+        let this = self.get_mut();
+        if this.state.is_new() {
+            this.state = State::Dirty;
+        }
+        if this.state == State::Dirty {
+            match this.plugboard.disconnects.pop() {
+                Ok(val) => {
+                    this.plugboard.waker.take();
+                    Poll::Ready(Some(val))
+                }
+                Err(PopError::Empty) => {
+                    this.plugboard.waker.register(ctx.waker());
+                    Poll::Pending
+                }
+                Err(PopError::Closed) => Poll::Ready(None),
+            }
+        } else {
+            Poll::Ready(None)
+        }
     }
 }
 
@@ -258,54 +264,29 @@ impl Line {
         DeviceID::new(&*self.plugboard as *const _ as usize)
     }
 
-    /// Ask to be notified when the provided Line disconnects
-    pub fn monitor(&self, line: Line) -> Result<(), LinkError> {
-        if self.device_id() != line.device_id() {
-            line.plugboard.attach(self.clone(), LinkError::LinkDown)
-        } else {
-            Err(LinkError::CantLinkSelf)
-        }
+    /// Report disconnection
+    pub fn report(self, disconnect: Disconnect) -> Result<(), Disconnect> {
+        self.plugboard.notify(disconnect)
     }
 
-    /// Ask to not be notified when the provided Line disconnects
-    pub fn demonitor(&self, line: &Line) -> Result<(), LinkError> {
-        if self.device_id() != line.device_id() {
-            line.plugboard.detach(self.device_id(), LinkError::LinkDown)
-        } else {
-            Err(LinkError::CantLinkSelf)
+    pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
+        if mode.monitor() {
+            other.plugboard.plug(self.clone(), LinkError::LinkDown)?;
         }
-    }
-
-    /// Notify the provided Line when we disconnect
-    pub fn attach(&self, line: Line) -> Result<(), LinkError> {
-        if self.device_id() != line.device_id() {
-            self.plugboard.attach(line, LinkError::DeviceDown)
-        } else {
-            Err(LinkError::CantLinkSelf)
+        if mode.notify() {
+            self.plugboard.plug(other, LinkError::DeviceDown)?;
         }
-    }
-
-    /// Undo attach
-    pub fn detach(&self, did: DeviceID) -> Result<(), LinkError> {
-        if self.device_id() != did {
-            self.plugboard.detach(did, LinkError::DeviceDown)
-        } else {
-            Err(LinkError::CantLinkSelf)
-        }
-    }
-
-    /// Monitor + attach
-    pub fn link(&self, line: Line) -> Result<(), LinkError> {
-        self.monitor(line.clone())?;
-        self.attach(line)?;
         Ok(())
     }
 
-    /// Undo link
-    pub fn unlink(&self, line: &Line) -> Result<(), LinkError> {
-        self.detach(line.device_id())?;
-        self.demonitor(line)?;
-        Ok(())
+    #[allow(unused_must_use)]
+    pub fn unlink_line(&self, other: &Line, mode: LinkMode) {
+        if mode.monitor() {
+            other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
+        }
+        if mode.notify() {
+            self.plugboard.unplug(other.device_id(), LinkError::DeviceDown);
+        }
     }
 }
 
@@ -318,4 +299,3 @@ impl PartialEq for Line {
         Arc::ptr_eq(&self.plugboard, &other.plugboard)
     }
 }
-

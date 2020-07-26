@@ -12,7 +12,7 @@ nightly = []
 
 [dependencies]
 anyhow = "1.0.31"
-async-channel = "1.1"
+atomic-waker = "1.0"
 concurrent-queue = "1.1"
 futures-lite = "0.1.5"
 maybe-unwind = "0.3"
@@ -23,3 +23,6 @@ rw_lease = "0.1.0"
 version = "0.3"
 optional = true
 
+[dev-dependencies]
+# criterion = "0.3"
+# im-rc = "15"

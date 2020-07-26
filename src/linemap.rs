@@ -1,6 +1,6 @@
 use crate::{DeviceID, Line};
 
-type Drain<'a, T> = std::vec::Drain<'a, T>;
+pub type Drain<'a, T> = std::vec::Drain<'a, T>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LineOp {
