@@ -14,10 +14,47 @@ use maybe_unwind::Unwind;
 use std::fmt::Display;
 
 /// Like 'Result', but with no semantic meaning
+#[derive(Debug)]
 pub enum Or<L, R> {
     Left(L),
     Right(R),
 }
+
+impl<L, R> Or<L, R> {
+    pub fn is_left(&self) -> bool {
+        if let Or::Left(_) = self { true } else { false }
+    }
+    pub fn is_right(&self) -> bool {
+        if let Or::Right(_) = self { true } else { false }
+    }
+    pub fn unwrap_left(self) -> Option<L> {
+        if let Or::Left(l) = self { Some(l) } else { None }
+    }
+    pub fn unwrap_right(self) -> Option<R> {
+        if let Or::Right(r) = self { Some(r) } else { None }
+    }
+}
+
+impl<L: PartialEq, R: PartialEq> PartialEq for Or<L, R> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Or::Left(l), Or::Left(r)) => l == r,
+            (Or::Right(l), Or::Right(r)) => l == r,
+            _ => false,
+        }
+    }
+}
+
+impl<L: Clone, R: Clone> Clone for Or<L, R> {
+    fn clone(&self) -> Self {
+        match self {
+            Or::Left(l) => Or::Left(l.clone()),
+            Or::Right(r) => Or::Right(r.clone()),
+        }
+    }
+}
+
+impl<L: Eq, R: Eq> Eq for Or<L, R> {}
 
 /// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
