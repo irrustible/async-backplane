@@ -1,10 +1,16 @@
 [package]
 name = "async-backplane"
 version = "0.1.0"
-readme = "README.md"
+description = "Simple, Erlang-inspired reliability backplane for Rust Futures."
+keywords = ["async", "erlang", "reliability", "supervisor", "supervision"]
+categories = ["asynchronous", "concurrency", "rust-patterns"]
+homepage = "https://github.com/irrustible/async_backplane"
+repository = "https://github.com/irrustible/async_backplane"
+documentation = "https://docs.rs/async_backplane"
 license = "MPL-2.0"
 authors = ["James Laver <james.laver@gmail.com>"]
 edition = "2018"
+readme = "README.md"
 
 [features]
 default = ["smol"]
@@ -17,12 +23,4 @@ concurrent-queue = "1.1"
 futures-lite = "0.1.5"
 maybe-unwind = "0.3"
 pin-project-lite = "0.1"
-rw_lease = "0.1.0"
-
-[dependencies.smol]
-version = "0.3"
-optional = true
-
-[dev-dependencies]
-# criterion = "0.3"
-# im-rc = "15"
+smol = { version = "0.3", optional = true }

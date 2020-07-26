@@ -16,7 +16,6 @@ dependencies = [
  "futures-lite",
  "maybe-unwind",
  "pin-project-lite",
- "rw_lease",
  "smol",
 ]
 
@@ -47,9 +46,9 @@ dependencies = [
 
 [[package]]
 name = "async-io"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca8126ef9fb99355c6fd27575d691be4887b884137a5b6f48c2d961f13590c51"
+checksum = "f4c982708a0344bfc72ea3de28719cb307336b5dd06a094263658d2154b83c24"
 dependencies = [
  "cfg-if",
  "concurrent-queue",
@@ -74,12 +73,6 @@ name = "atomic-waker"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "065374052e7df7ee4047b1160cca5e1467a12351a40b3da123c870ba0b8eda2a"
-
-[[package]]
-name = "atomic_prim_traits"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e81134b8403479f901fb108e58dece081e3f87bc031e0cfde29e9372ad5557e"
 
 [[package]]
 name = "blocking"
@@ -236,26 +229,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282adbf10f2698a7a77f8e983a74b2d18176c19a7fd32a45446139ae7b02b715"
 
 [[package]]
-name = "primitive_traits"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff1fce8f7e64aa6d866737c60f38b47dfc5863303bf7e2f68748db118d820eb3"
-
-[[package]]
 name = "redox_syscall"
 version = "0.1.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41cc0f7e4d5d4544e8861606a285bb08d3e70712ccc7d2b84d7c0ccfaf4b05ce"
-
-[[package]]
-name = "rw_lease"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3a354ffb43af5307344d2d3c01569daeeec66cb515ca9fb3b6181d54c4b2611"
-dependencies = [
- "atomic_prim_traits",
- "primitive_traits",
-]
 
 [[package]]
 name = "scoped-tls"
