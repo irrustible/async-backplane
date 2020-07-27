@@ -93,7 +93,7 @@ fn monitored_device_drops() {
     let crash = t.join().unwrap().unwrap_err();
     if let Crash::Cascade(report) = crash {
         assert_eq!(device_id, report.device_id);
-        assert_eq!(report.result, Fault::Error);
+        assert_eq!(report.result, Fault::Drop);
     } else {
         unreachable!();
     }
@@ -114,7 +114,7 @@ fn monitored_link_drops() {
     let crash = t.join().unwrap().unwrap_err();
     if let Crash::Cascade(report) = crash {
         assert_eq!(device_id, report.device_id);
-        assert_eq!(report.result, Fault::Error);
+        assert_eq!(report.result, Fault::Drop);
     } else {
         unreachable!();
     }
@@ -203,7 +203,7 @@ fn peer_device_drops() {
     let crash = t.join().unwrap().unwrap_err();
     if let Crash::Cascade(report) = crash {
         assert_eq!(device_id, report.device_id);
-        assert_eq!(report.result, Fault::Error);
+        assert_eq!(report.result, Fault::Drop);
     } else {
         unreachable!();
     }
@@ -224,7 +224,7 @@ fn peer_link_drops() {
     let crash = t.join().unwrap().unwrap_err();
     if let Crash::Cascade(report) = crash {
         assert_eq!(device_id, report.device_id);
-        assert_eq!(report.result, Fault::Error);
+        assert_eq!(report.result, Fault::Drop);
     } else {
         unreachable!();
     }
