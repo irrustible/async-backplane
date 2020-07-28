@@ -11,6 +11,7 @@ name = "async-backplane"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channels",
  "atomic-waker",
  "concurrent-queue",
  "futures-lite",
@@ -28,6 +29,16 @@ dependencies = [
  "concurrent-queue",
  "event-listener",
  "futures-core",
+]
+
+[[package]]
+name = "async-channels"
+version = "0.1.0"
+source = "git+https://github.com/irrustible/async-channels?branch=main#ba2a753ae762ed3d018c099a7a2b6cc437451691"
+dependencies = [
+ "atomic-waker",
+ "concurrent-queue",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -146,9 +157,9 @@ checksum = "de27142b013a8e869c14957e6d2edeef89e97c289e69d042ee3a49acd8b51789"
 
 [[package]]
 name = "futures-lite"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cc8771bd1bb4c7be3c5f072a1d5e18086ef220f100a0a4efece41076e87b9f2"
+checksum = "bbe71459749b2e8e66fb95df721b22fa08661ad384a0c5b519e11d3893b4692a"
 dependencies = [
  "fastrand",
  "futures-core",
@@ -242,14 +253,15 @@ checksum = "ea6a9290e3c9cf0f18145ef7ffa62d68ee0bf5fcd651017e586dc7fd5da448c2"
 
 [[package]]
 name = "smol"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5845838db1ab989f5ea8390faf8a5607de76b6fa70e4d5faf84780192b723a62"
+checksum = "67583f4ccc13bbb105a0752058d8ad66c47753d85445952809bcaca891954f83"
 dependencies = [
  "async-channel",
  "async-executor",
  "async-io",
  "blocking",
+ "cfg-if",
  "easy-parallel",
  "futures-lite",
  "num_cpus",

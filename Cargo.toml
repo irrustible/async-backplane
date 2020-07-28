@@ -4,9 +4,9 @@ version = "0.1.0"
 description = "Simple, Erlang-inspired reliability backplane for Rust Futures."
 keywords = ["async", "erlang", "reliability", "supervisor", "supervision"]
 categories = ["asynchronous", "concurrency", "rust-patterns"]
-homepage = "https://github.com/irrustible/async_backplane"
-repository = "https://github.com/irrustible/async_backplane"
-documentation = "https://docs.rs/async_backplane"
+homepage = "https://github.com/irrustible/async-backplane"
+repository = "https://github.com/irrustible/async-backplane"
+documentation = "https://docs.rs/async-backplane"
 license = "MPL-2.0"
 authors = ["James Laver <james.laver@gmail.com>"]
 edition = "2018"
@@ -24,3 +24,5 @@ futures-lite = "0.1.5"
 maybe-unwind = "0.3"
 pin-project-lite = "0.1"
 smol = { version = "0.3", optional = true }
+# async-channels = { path = "../async-channels" }
+async-channels = { git = "https://github.com/irrustible/async-channels", branch = "main"}

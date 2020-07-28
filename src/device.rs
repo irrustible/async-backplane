@@ -3,6 +3,7 @@ use smol::Task;
 use concurrent_queue::PopError;
 use futures_lite::{Future, Stream, StreamExt};
 use std::any::Any;
+use std::cell::RefCell;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -14,9 +15,32 @@ use crate::utils::{biased_race, DontPanic};
 /// A Device connects a Future to the backplane.
 #[derive(Debug)]
 pub struct Device {
-    pub(crate) plugboard: Arc<Plugboard>,
+    plugboard: Arc<Plugboard>,
+    // This is here so we don't have to mark everything
+    // mut. Accordingly, we also can't let the user have direct
+    // access, in case they e.g. hold it across an await boundary.
+    inner: RefCell<Inner>,
+}
+
+#[derive(Debug)]
+struct Inner {
     out: LineMap,
     state: State,
+}
+
+impl Inner {
+    // Actually send all the messages
+    fn report(&mut self, report: Report<Option<Fault>>) {
+        let mut last: Option<Report<Option<Fault>>> = None; // avoid copying
+        for (_, maybe) in self.out.drain() {
+            if let Some(line) = maybe {
+                let r = last.take().unwrap_or_else(|| report.clone());
+                if let Err(e) = line.report(r) {
+                    last = Some(e);
+                }
+            }
+        }
+    }
 }
 
 // The return type of `.watch()`
@@ -46,8 +70,7 @@ impl Device {
     pub fn new() -> Self {
         Device {
             plugboard: Arc::new(Plugboard::new()),
-            out: LineMap::new(),
-            state: State::New,
+            inner: RefCell::new(Inner { out: LineMap::new(), state: State::New}),
         }
     }
 
@@ -62,61 +85,54 @@ impl Device {
     }
 
     /// Notify our peers we're disconnecting
-    pub fn disconnect(mut self, fault: Option<Fault>) {
+    pub fn disconnect(self, fault: Option<Fault>) {
+        self.do_disconnect(fault);
+    }
+
+    fn do_disconnect(&self, fault: Option<Fault>) {
         self.plugboard.close(); // no more requests
-        while let Ok(op) = self.plugboard.line_ops.pop() { self.out.apply(op); } // sync
-        self.report(Report::new(self.device_id(), fault));
-        self.state = State::Done;
+        let mut inner = self.inner.borrow_mut();
+        while let Ok(op) = self.plugboard.line_ops.pop() { inner.out.apply(op); } // sync
+        inner.report(Report::new(self.device_id(), fault));
     }
 
-    // Actually send all the messages
-    fn report(&mut self, report: Report<Option<Fault>>) {
-        let mut last: Option<Report<Option<Fault>>> = None; // avoid copying
-        for (_, maybe) in self.out.drain() {
-            if let Some(line) = maybe {
-                let r = last.take().unwrap_or_else(|| report.clone());
-                if let Err(e) = line.report(r) {
-                    last = Some(e);
-                }
-            }
-        }
-    }
-
-    pub fn link(&mut self, other: &mut Device, mode: LinkMode) {
+    pub fn link(&self, other: &Device, mode: LinkMode) {
         if mode.monitor() {
-            other.out.attach(Line { plugboard: self.plugboard.clone() });
+            other.inner.borrow_mut().out
+                .attach(Line { plugboard: self.plugboard.clone() });
         }
         if mode.notify() {
-            self.out.attach(Line { plugboard: other.plugboard.clone() });
+            self.inner.borrow_mut().out
+                .attach(Line { plugboard: other.plugboard.clone() });
         }
     }
 
-    pub fn unlink(&mut self, other: &mut Device, mode: LinkMode) {
+    pub fn unlink(&self, other: &Device, mode: LinkMode) {
         if mode.monitor() {
-            other.out.detach(self.device_id());
+            other.inner.borrow_mut().out.detach(self.device_id());
         }
         if mode.notify() {
-            self.out.detach(other.device_id());
+            self.inner.borrow_mut().out.detach(other.device_id());
         }
     }
    
-    pub fn link_line(&mut self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
+    pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
         if mode.monitor() {
             other.plugboard.plug(self.line(), LinkError::LinkDown)?;
         }
         if mode.notify() {
-            self.out.attach(other);
+            self.inner.borrow_mut().out.attach(other);
         }
         Ok(())
     }
 
     #[allow(unused_must_use)]
-    pub fn unlink_line(&mut self, other: &Line, mode: LinkMode) {
+    pub fn unlink_line(&self, other: &Line, mode: LinkMode) {
         if mode.monitor() {
             other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
         }
         if mode.notify() {
-            self.out.detach(other.device_id());
+            self.inner.borrow_mut().out.detach(other.device_id());
         }
     }
 
@@ -216,10 +232,11 @@ impl Device {
 
 impl Drop for Device {
     fn drop(&mut self) {
-        if self.state != State::Done {
+        let mut inner = self.inner.borrow_mut();
+        if inner.state != State::Done {
             self.plugboard.close(); // no more requests
-            while let Ok(op) = self.plugboard.line_ops.pop() { self.out.apply(op); } // sync
-            self.report(Report::new(self.device_id(), Some(Fault::Drop)));
+            while let Ok(op) = self.plugboard.line_ops.pop() { inner.out.apply(op); } // sync
+            inner.report(Report::new(self.device_id(), Some(Fault::Drop)));
         }
     }
 }
@@ -230,18 +247,24 @@ impl Stream for Device {
     type Item = Disconnect;
     fn poll_next(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        if this.state.is_new() {
-            this.state = State::Dirty;
+        let mut inner = this.inner.borrow_mut();
+        if inner.state.is_new() {
+            inner.state = State::Dirty;
         }
-        if this.state == State::Dirty {
-            match this.plugboard.disconnects.pop() {
+        if inner.state == State::Dirty {
+            match this.plugboard.disconnects.try_pop() {
                 Ok(val) => {
-                    this.plugboard.waker.take();
                     Poll::Ready(Some(val))
                 }
                 Err(PopError::Empty) => {
-                    this.plugboard.waker.register(ctx.waker());
-                    Poll::Pending
+                    this.plugboard.disconnects.register(ctx.waker());
+                    // This might be unnecessary, but I suspect there
+                    // is a race condition it guards against - TODO check.
+                    match this.plugboard.disconnects.try_pop() {
+                        Ok(val) => Poll::Ready(Some(val)),
+                        Err(PopError::Empty) => Poll::Pending,
+                        Err(PopError::Closed) => Poll::Ready(None),
+                    }
                 }
                 Err(PopError::Closed) => Poll::Ready(None),
             }
