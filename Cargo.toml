@@ -23,6 +23,5 @@ concurrent-queue = "1.1"
 futures-lite = "0.1.5"
 maybe-unwind = "0.3"
 pin-project-lite = "0.1"
+waker-queue = "0.1"
 smol = { version = "0.3", optional = true }
-# async-channels = { path = "../async-channels" }
-async-channels = { git = "https://github.com/irrustible/async-channels", branch = "main"}

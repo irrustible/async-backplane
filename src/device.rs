@@ -25,7 +25,7 @@ pub struct Device {
 #[derive(Debug)]
 struct Inner {
     out: LineMap,
-    state: State,
+    done: bool
 }
 
 impl Inner {
@@ -35,9 +35,7 @@ impl Inner {
         for (_, maybe) in self.out.drain() {
             if let Some(line) = maybe {
                 let r = last.take().unwrap_or_else(|| report.clone());
-                if let Err(e) = line.report(r) {
-                    last = Some(e);
-                }
+                if let Err(e) = line.report(r) { last = Some(e); }
             }
         }
     }
@@ -52,25 +50,13 @@ pub type PartManage<T, C=Error> = Result<(Device, T), Crash<C>>;
 // The return type of `.manage()`
 pub type Manage<T, C=Error> = Result<T, Crash<C>>;
 
-
-#[derive(Debug, Eq, PartialEq)]
-enum State {
-    New,
-    Dirty,
-    Done,
-}
-
-impl State {
-    fn is_new(&self) -> bool { *self == State::New }
-}
-
 impl Device {
 
     /// Creates a new Device
     pub fn new() -> Self {
         Device {
             plugboard: Arc::new(Plugboard::new()),
-            inner: RefCell::new(Inner { out: LineMap::new(), state: State::New}),
+            inner: RefCell::new(Inner { out: LineMap::new(), done: false }),
         }
     }
 
@@ -97,51 +83,64 @@ impl Device {
     }
 
     pub fn link(&self, other: &Device, mode: LinkMode) {
-        if mode.monitor() {
-            other.inner.borrow_mut().out
-                .attach(Line { plugboard: self.plugboard.clone() });
-        }
-        if mode.notify() {
-            self.inner.borrow_mut().out
-                .attach(Line { plugboard: other.plugboard.clone() });
+        if self.device_id() != other.device_id() {
+             if mode.monitor() {
+                 other.inner.borrow_mut().out
+                     .attach(Line { plugboard: self.plugboard.clone() });
+             }
+             if mode.notify() {
+                 self.inner.borrow_mut().out
+                     .attach(Line { plugboard: other.plugboard.clone() });
+             }
+        } else {
+            panic!("Do not link to yourself!");
         }
     }
 
     pub fn unlink(&self, other: &Device, mode: LinkMode) {
-        if mode.monitor() {
-            other.inner.borrow_mut().out.detach(self.device_id());
-        }
-        if mode.notify() {
-            self.inner.borrow_mut().out.detach(other.device_id());
+        if self.device_id() != other.device_id() {
+            if mode.monitor() {
+                other.inner.borrow_mut().out.detach(self.device_id());
+            }
+            if mode.notify() {
+                self.inner.borrow_mut().out.detach(other.device_id());
+            }
+        } else {
+            panic!("Do not link to yourself!");
         }
     }
    
     pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
-        if mode.monitor() {
-            other.plugboard.plug(self.line(), LinkError::LinkDown)?;
+        if self.device_id() != other.device_id() {
+            if mode.monitor() {
+                other.plugboard.plug(self.line(), LinkError::LinkDown)?;
+            }
+            if mode.notify() {
+                self.inner.borrow_mut().out.attach(other);
+            }
+            Ok(())
+        } else {
+            panic!("Do not link to yourself!");
         }
-        if mode.notify() {
-            self.inner.borrow_mut().out.attach(other);
-        }
-        Ok(())
     }
 
     #[allow(unused_must_use)]
     pub fn unlink_line(&self, other: &Line, mode: LinkMode) {
-        if mode.monitor() {
-            other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
-        }
-        if mode.notify() {
-            self.inner.borrow_mut().out.detach(other.device_id());
+        if self.device_id() != other.device_id() {
+            if mode.monitor() {
+                other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
+            }
+            if mode.notify() {
+                self.inner.borrow_mut().out.detach(other.device_id());
+            }
+        } else {
+            panic!("Do not link to yourself!");
         }
     }
 
     /// Races the next disconnection from the Device and the provided
     /// future (which is wrapped to protect against crash)
-    pub async fn watch<F, C>(
-        &mut self,
-        f: F
-    ) -> Watch<<F as Future>::Output, C>
+    pub async fn watch<F, C>(&mut self, f: F) -> Watch<<F as Future>::Output, C>
     where F: Future + Unpin, C: 'static + Any + Send {
         let mut future = DontPanic::new(f);
         biased_race(
@@ -163,18 +162,23 @@ impl Device {
     /// crashes, announces that we have crashed to whoever is
     /// monitoring us. If it does not crash, returns the original
     /// Device for reuse along with the closure result.
-    pub async fn part_manage<'a, F, T, C>(
-        mut self, mut f: F
-    ) -> PartManage<T, C>
-    where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
+    pub async fn part_manage<'a, F, T, C>(mut self, mut f: F) -> PartManage<T, C>
+    where F: Future<Output = Result<T, C>> + Unpin, C: 'static + Send {
         loop {
             match self.watch(&mut f).await {
-                Ok(Or::Left(Ok(val))) => { return Ok((self, val)); }
+                Ok(Or::Left(Ok(val))) => {
+                    #[allow(unused_must_use)]
+                    if !self.inner.borrow_mut().out.detach(self.device_id()) {
+                        self.plugboard.unplug(self.device_id(), LinkError::LinkDown);
+                    }
+                    return Ok((self, val));
+                }
                 Ok(Or::Right(disco)) => {
                     if let Some(fault) = disco.result {
                         self.disconnect(Some(Fault::Cascade(disco.device_id)));
                         return Err(Crash::Cascade(Report::new(disco.device_id, fault)));
                     }
+                    continue;
                 }
                 Ok(Or::Left(Err(val))) => {
                     self.disconnect(Some(Fault::Error));
@@ -233,13 +237,13 @@ impl Device {
 impl Drop for Device {
     fn drop(&mut self) {
         let mut inner = self.inner.borrow_mut();
-        if inner.state != State::Done {
+        if !inner.done {
             self.plugboard.close(); // no more requests
             while let Ok(op) = self.plugboard.line_ops.pop() { inner.out.apply(op); } // sync
             inner.report(Report::new(self.device_id(), Some(Fault::Drop)));
         }
     }
-}
+ }
 
 impl Unpin for Device {}
 
@@ -248,25 +252,25 @@ impl Stream for Device {
     fn poll_next(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         let mut inner = this.inner.borrow_mut();
-        if inner.state.is_new() {
-            inner.state = State::Dirty;
-        }
-        if inner.state == State::Dirty {
+        if !inner.done {
             match this.plugboard.disconnects.try_pop() {
-                Ok(val) => {
-                    Poll::Ready(Some(val))
-                }
+                Ok(val) => Poll::Ready(Some(val)),
                 Err(PopError::Empty) => {
                     this.plugboard.disconnects.register(ctx.waker());
-                    // This might be unnecessary, but I suspect there
-                    // is a race condition it guards against - TODO check.
+                    // Make sure we don't lose out in a race
                     match this.plugboard.disconnects.try_pop() {
-                        Ok(val) => Poll::Ready(Some(val)),
+                        Ok(val) => Poll::Ready(Some(val)), // Sorry for leaving a waker
                         Err(PopError::Empty) => Poll::Pending,
-                        Err(PopError::Closed) => Poll::Ready(None),
+                        Err(PopError::Closed) => {
+                            inner.done = true;
+                            Poll::Ready(None)
+                        }
                     }
                 }
-                Err(PopError::Closed) => Poll::Ready(None),
+                Err(PopError::Closed) => {
+                    inner.done = true;
+                    Poll::Ready(None)
+                }
             }
         } else {
             Poll::Ready(None)

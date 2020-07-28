@@ -62,31 +62,37 @@ impl Small {
 
     fn attach(&mut self, line: Line) -> bool {
         let line_did = line.device_id();
-        for (did, ref mut loon) in self.inner.iter_mut() {
+        let mut last_free: Option<usize> = None;
+        for (idx, (did, ref mut loon)) in self.inner.iter_mut().enumerate() {
             if *did == line_did {
                 *loon = Some(line);
                 return true;
+            } else if loon.is_none() {
+                last_free = Some(idx);
+                continue;
             }
         }
-        for (ref mut did, ref mut loon) in self.inner.iter_mut() {
-            if loon.is_none() {
-                *did = line_did;
-                *loon = Some(line);
-                return false;
-            }
+        if let Some(free) = last_free {
+            self.inner[free] = (line_did, Some(line));
+        } else {
+            self.inner.push((line_did, Some(line)));
         }
-        self.inner.push((line_did, Some(line)));
-        return false;
+        false
     }
 
     fn detach(&mut self, did: DeviceID) -> bool {
-        for (did2, ref mut loon) in self.inner.iter_mut() {
+        let count = self.inner.len();
+        for (idx, (did2, ref mut loon)) in self.inner.iter_mut().enumerate() {
             if did == *did2 {
-                *loon = None;
+                if idx == (count - 1) {
+                    self.inner.pop();
+                } else {
+                    *loon = None;
+                }
                 return true;
             }
         }
-        return false;
+        false
     }
 
 }

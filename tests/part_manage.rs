@@ -150,25 +150,25 @@ fn monitored_line_succeeds() {
     assert_eq!(result, ());
 }
 
-// #[test] // hangs forever - why?! TODO
-// fn monitored_line_errors() {
-//     let d1 = Device::new();
-//     let d2 = Device::new();
-//     let device_id = d1.device_id();
-//     let line = d2.line();
-//     d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
-//     let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
-//     let t2: JoinHandle<PartManage<()>> =
-//         spawn(move || block_on(d2.part_manage(pending())));
-//     assert_eq!((), t1.join().unwrap());
-//     let crash = t2.join().unwrap().unwrap_err();
-//     if let Crash::Cascade(report) = crash {
-//         assert_eq!(device_id, report.device_id);
-//         assert!(report.result.is_error());
-//     } else {
-//         unreachable!();
-//     }
-// }
+#[test] // hangs forever - why?! TODO
+fn monitored_line_errors() {
+    let d1 = Device::new();
+    let d2 = Device::new();
+    let device_id = d1.device_id();
+    let line = d1.line();
+    d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
+    let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
+    let t2: JoinHandle<PartManage<()>> =
+        spawn(move || block_on(d2.part_manage(pending())));
+    assert_eq!((), t1.join().unwrap());
+    let crash = t2.join().unwrap().unwrap_err();
+    if let Crash::Cascade(report) = crash {
+        assert_eq!(device_id, report.device_id);
+        assert!(report.result.is_error());
+    } else {
+        unreachable!();
+    }
+}
 
 #[test]
 fn monitored_line_drops() {

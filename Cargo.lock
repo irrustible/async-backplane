@@ -11,13 +11,13 @@ name = "async-backplane"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channels",
  "atomic-waker",
  "concurrent-queue",
  "futures-lite",
  "maybe-unwind",
  "pin-project-lite",
  "smol",
+ "waker-queue",
 ]
 
 [[package]]
@@ -29,16 +29,6 @@ dependencies = [
  "concurrent-queue",
  "event-listener",
  "futures-core",
-]
-
-[[package]]
-name = "async-channels"
-version = "0.1.0"
-source = "git+https://github.com/irrustible/async-channels?branch=main#ba2a753ae762ed3d018c099a7a2b6cc437451691"
-dependencies = [
- "atomic-waker",
- "concurrent-queue",
- "pin-project-lite",
 ]
 
 [[package]]
@@ -290,6 +280,17 @@ name = "waker-fn"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9571542c2ce85ce642e6b58b3364da2fb53526360dfb7c211add4f5c23105ff7"
+
+[[package]]
+name = "waker-queue"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab74d1a40ba941c730e4dbc71ae1be4a61df69669b5a3a876913fd9a1c1aceb5"
+dependencies = [
+ "atomic-waker",
+ "concurrent-queue",
+ "pin-project-lite",
+]
 
 [[package]]
 name = "wepoll-sys-stjepang"

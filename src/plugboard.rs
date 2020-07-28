@@ -1,7 +1,7 @@
 use concurrent_queue::ConcurrentQueue;
 use crate::{DeviceID, Disconnect, Line, LinkError};
 use crate::linemap::LineOp;
-use async_channels::waker_queue::WakerQueue;
+use waker_queue::WakerQueue;
 
 #[derive(Debug)]
 pub(crate) struct Plugboard {
