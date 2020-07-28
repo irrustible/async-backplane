@@ -18,10 +18,10 @@ fn solo_succeeds() {
 
 #[test]
 fn monitored_device_succeeds() {
-    let mut d1 = Device::new();
-    let mut d2 = Device::new();
+    let d1 = Device::new();
+    let d2 = Device::new();
     let device_id = d2.device_id();
-    d2.link(&mut d1, LinkMode::Monitor);
+    d2.link(&d1, LinkMode::Monitor);
 
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
@@ -35,10 +35,10 @@ fn monitored_device_succeeds() {
 
 #[test]
 fn monitored_device_errors() {
-    let mut d1 = Device::new();
-    let mut d2 = Device::new();
+    let d1 = Device::new();
+    let d2 = Device::new();
     let device_id = d1.device_id();
-    d2.link(&mut d1, LinkMode::Monitor);
+    d2.link(&d1, LinkMode::Monitor);
     let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
     let t2: JoinHandle<PartManage<()>> =
         spawn(move || block_on(d2.part_manage(pending())));
@@ -54,11 +54,11 @@ fn monitored_device_errors() {
 
 #[test]
 fn monitored_device_drops() {
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let device_id = {
-        let mut d1 = Device::new();
+        let d1 = Device::new();
         let id = d1.device_id();
-        d2.link(&mut d1, LinkMode::Monitor);
+        d2.link(&d1, LinkMode::Monitor);
         id
     };
     let t: JoinHandle<PartManage<()>> =
@@ -74,10 +74,10 @@ fn monitored_device_drops() {
 
 #[test]
 fn peer_device_succeeds() {
-    let mut d1 = Device::new();
-    let mut d2 = Device::new();
+    let d1 = Device::new();
+    let d2 = Device::new();
     let device_id = d2.device_id();
-    d1.link(&mut d2, LinkMode::Peer);
+    d1.link(&d2, LinkMode::Peer);
 
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
@@ -92,12 +92,11 @@ fn peer_device_succeeds() {
 
 #[test]
 fn peer_device_crashes() {
-
-    let mut d1 = Device::new();
-    let mut d2 = Device::new();
+    let d1 = Device::new();
+    let d2 = Device::new();
     let device_id = d2.device_id();
 
-    d1.link(&mut d2, LinkMode::Peer);
+    d1.link(&d2, LinkMode::Peer);
 
     let t1 = spawn(move || d2.disconnect(Some(Fault::Error)));
     let t2: JoinHandle<PartManage<()>> =
@@ -115,11 +114,10 @@ fn peer_device_crashes() {
 
 #[test]
 fn peer_device_drops() {
-
-    let mut d1 = Device::new();
+    let d1 = Device::new();
     let device_id = { // d2 won't survive this block
-        let mut d2 = Device::new();
-        d1.link(&mut d2, LinkMode::Peer);
+        let d2 = Device::new();
+        d1.link(&d2, LinkMode::Peer);
         d2.device_id()
     };
 
@@ -137,7 +135,7 @@ fn peer_device_drops() {
 #[test]
 fn monitored_line_succeeds() {
     let d1 = Device::new();
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let device_id = d2.device_id();
     let line = d1.line();
     d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
@@ -152,10 +150,10 @@ fn monitored_line_succeeds() {
     assert_eq!(result, ());
 }
 
-// #[test]
+// #[test] // hangs forever - why?! TODO
 // fn monitored_line_errors() {
 //     let d1 = Device::new();
-//     let mut d2 = Device::new();
+//     let d2 = Device::new();
 //     let device_id = d1.device_id();
 //     let line = d2.line();
 //     d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
@@ -165,7 +163,7 @@ fn monitored_line_succeeds() {
 //     assert_eq!((), t1.join().unwrap());
 //     let crash = t2.join().unwrap().unwrap_err();
 //     if let Crash::Cascade(report) = crash {
-//         assert_eq!(report.device_id, device_id);
+//         assert_eq!(device_id, report.device_id);
 //         assert!(report.result.is_error());
 //     } else {
 //         unreachable!();
@@ -174,7 +172,7 @@ fn monitored_line_succeeds() {
 
 #[test]
 fn monitored_line_drops() {
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let device_id = {
         let d1 = Device::new();
         let id = d1.device_id();
@@ -195,7 +193,7 @@ fn monitored_line_drops() {
 
 #[test]
 fn peer_line_succeeds() {
-    let mut d1 = Device::new();
+    let d1 = Device::new();
     let d2 = Device::new();
     let device_id = d2.device_id();
     let line = d2.line();
@@ -214,7 +212,7 @@ fn peer_line_succeeds() {
 #[test]
 fn peer_line_crashes() {
 
-    let mut d1 = Device::new();
+    let d1 = Device::new();
     let d2 = Device::new();
     let device_id = d2.device_id();
     let line = d2.line();
@@ -237,7 +235,7 @@ fn peer_line_crashes() {
 #[test]
 fn peer_line_drops() {
 
-    let mut d1 = Device::new();
+    let d1 = Device::new();
     let device_id = { // d2 won't survive this block
         let d2 = Device::new();
         let line = d2.line();

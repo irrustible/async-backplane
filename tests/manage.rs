@@ -12,9 +12,9 @@ fn solo_succeeds() {
 
 #[test]
 fn monitored_device_succeeds() {
-    let mut d1 = Device::new();
-    let mut d2 = Device::new();
-    d2.link(&mut d1, LinkMode::Monitor);
+    let d1 = Device::new();
+    let d2 = Device::new();
+    d2.link(&d1, LinkMode::Monitor);
 
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
@@ -27,7 +27,7 @@ fn monitored_device_succeeds() {
 #[test]
 fn monitored_line_succeeds() {
     let d1 = Device::new();
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let line = d1.line();
     d2.link_line(line, LinkMode::Monitor).expect("link");
 
@@ -42,10 +42,10 @@ fn monitored_line_succeeds() {
 
 #[test]
 fn monitored_device_crashes() {
-    let mut d1 = Device::new();
-    let mut d2 = Device::new();
+    let d1 = Device::new();
+    let d2 = Device::new();
     let device_id = d1.device_id();
-    d2.link(&mut d1, LinkMode::Monitor);
+    d2.link(&d1, LinkMode::Monitor);
     let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
     let t2: JoinHandle<Manage<()>> =
         spawn(move || block_on(d2.manage(pending())));
@@ -62,7 +62,7 @@ fn monitored_device_crashes() {
 #[test]
 fn monitored_line_crashes() {
     let d1 = Device::new();
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let device_id = d1.device_id();
     let line = d1.line();
     d2.link_line(line, LinkMode::Monitor).expect("link");
@@ -81,11 +81,11 @@ fn monitored_line_crashes() {
 
 #[test]
 fn monitored_device_drops() {
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let device_id = {
-        let mut d1 = Device::new();
+        let d1 = Device::new();
         let id = d1.device_id();
-        d2.link(&mut d1, LinkMode::Monitor);
+        d2.link(&d1, LinkMode::Monitor);
         id
     };
     let t: JoinHandle<Manage<()>> =
@@ -100,8 +100,8 @@ fn monitored_device_drops() {
 }
 
 #[test]
-fn monitored_link_drops() {
-    let mut d2 = Device::new();
+fn monitored_line_drops() {
+    let d2 = Device::new();
     let device_id = {
         let d1 = Device::new();
         let line = d1.line();
@@ -122,9 +122,9 @@ fn monitored_link_drops() {
 
 #[test]
 fn peer_device_succeeds() {
-    let mut d1 = Device::new();
-    let mut d2 = Device::new();
-    d2.link(&mut d1, LinkMode::Peer);
+    let d1 = Device::new();
+    let d2 = Device::new();
+    d2.link(&d1, LinkMode::Peer);
 
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
@@ -137,7 +137,7 @@ fn peer_device_succeeds() {
 #[test]
 fn peer_line_succeeds() {
     let d1 = Device::new();
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let line = d1.line();
     d2.link_line(line, LinkMode::Peer).expect("link");
 
@@ -152,10 +152,10 @@ fn peer_line_succeeds() {
 
 #[test]
 fn peer_device_crashes() {
-    let mut d1 = Device::new();
-    let mut d2 = Device::new();
+    let d1 = Device::new();
+    let d2 = Device::new();
     let device_id = d1.device_id();
-    d2.link(&mut d1, LinkMode::Peer);
+    d2.link(&d1, LinkMode::Peer);
     let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
     let t2: JoinHandle<Manage<()>> =
         spawn(move || block_on(d2.manage(pending())));
@@ -172,7 +172,7 @@ fn peer_device_crashes() {
 #[test]
 fn peer_line_crashes() {
     let d1 = Device::new();
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let device_id = d1.device_id();
     let line = d1.line();
     d2.link_line(line, LinkMode::Peer).expect("link");
@@ -191,11 +191,11 @@ fn peer_line_crashes() {
 
 #[test]
 fn peer_device_drops() {
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let device_id = {
-        let mut d1 = Device::new();
+        let d1 = Device::new();
         let id = d1.device_id();
-        d2.link(&mut d1, LinkMode::Peer);
+        d2.link(&d1, LinkMode::Peer);
         id
     };
     let t: JoinHandle<Manage<()>> =
@@ -211,7 +211,7 @@ fn peer_device_drops() {
 
 #[test]
 fn peer_link_drops() {
-    let mut d2 = Device::new();
+    let d2 = Device::new();
     let device_id = {
         let d1 = Device::new();
         let line = d1.line();
