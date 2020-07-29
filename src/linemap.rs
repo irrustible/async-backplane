@@ -8,7 +8,6 @@ pub(crate) enum LineOp {
     Detach(DeviceID),
 }
 
-
 #[derive(Debug)]
 pub(crate) struct LineMap {
     inner: Inner,

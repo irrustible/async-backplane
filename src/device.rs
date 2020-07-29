@@ -26,11 +26,11 @@ pub struct Device {
 #[derive(Debug)]
 struct Inner {
     out: LineMap,
-    done: bool
+    done: bool,
 }
 
 impl Inner {
-    // Actually send all the messages
+    // Actually send all the messages.
     fn send(&mut self, message: Message) {
         let mut last: Option<Message> = None; // avoid copying
         for (_, maybe) in self.out.drain() {
@@ -42,31 +42,36 @@ impl Inner {
     }
 }
 
+/// A result from `watch()`.
 #[derive(Debug)]
 pub enum Watched<T: Debug> {
+    /// The provided Future completed.
     Completed(T),
+    /// A message was received.
     Messaged(Message),
 }
 
-pub use Watched::{Completed, Messaged};
+use Watched::{Completed, Messaged};
 
 impl<T: Debug> Watched<T> {
+
+    /// True if the future completed.
     pub fn is_completed(&self) -> bool {
         if let Messaged(_) = self { true } else { false }
     }
+
+    /// True if we received a message.
     pub fn is_messaged(&self) -> bool {
         if let Messaged(_) = self { true } else { false }
     }
-    pub fn completed(&self) -> Option<&T> {
-        if let Completed(c) = self { Some(&c) } else { None }
-    }
-    pub fn messaged(&self) -> Option<&Message> {
-        if let Messaged(m) = self { Some(&m) } else { None }
-    }
+
+    /// Take the completed result or panic.
     pub fn unwrap_completed(self) -> T {
         if let Completed(c) = self { c }
         else { panic!("Watched is not Completed"); }
     }
+
+    /// Take the received message or panic.
     pub fn unwrap_messaged(self) -> Message {
         if let Messaged(m) = self { m }
         else { panic!("Watched is not Messaged"); }
@@ -87,7 +92,7 @@ impl<T: Debug + Eq> Eq for Watched<T> {}
 
 impl Device {
 
-    /// Creates a new Device
+    /// Creates a new Device.
     pub fn new() -> Self {
         Device {
             plugboard: Arc::new(Plugboard::new()),
@@ -95,17 +100,17 @@ impl Device {
         }
     }
 
-    /// Get the ID of the Device on the other end of the Line
+    /// Get the ID of this Device.
     pub fn device_id(&self) -> DeviceID {
         DeviceID::new(&*self.plugboard as *const _ as usize)
     }
 
-    /// Opens a line to the Device
+    /// Opens a line to the Device.
     pub fn line(&self) -> Line {
         Line { plugboard: self.plugboard.clone() }
     }
 
-    /// Notify our peers we're disconnecting
+    /// Notify our peers we're disconnecting.
     pub fn disconnect(self, fault: Option<Fault>) {
         self.do_disconnect(fault);
     }
@@ -117,6 +122,12 @@ impl Device {
         inner.send(Disconnected(Report::new(self.device_id(), fault)));
     }
 
+    /// Link with another Device with the provided LinkMode. LinkModes
+    /// are additive, so you can 'upgrade' a link this way.
+    ///
+    /// This method is intended for static-style linking, where the
+    /// topology is not expected to change. You should not link to a
+    /// Device this way after linking to it through a Line.
     pub fn link(&self, other: &Device, mode: LinkMode) {
         if self.device_id() != other.device_id() {
              if mode.monitor() {
@@ -132,6 +143,12 @@ impl Device {
         }
     }
 
+    /// Unlink from another Device with the provided LinkMode. LinkModes
+    /// are subtractive, so you can 'downgrade' a link this way.
+    ///
+    /// This method is intended for static-style linking, where the
+    /// topology is not expected to change. You should not link to a
+    /// Device this way after linking to it through a Line.
     pub fn unlink(&self, other: &Device, mode: LinkMode) {
         if self.device_id() != other.device_id() {
             if mode.monitor() {
@@ -145,6 +162,8 @@ impl Device {
         }
     }
    
+    /// Link with a line. This is safer than linking directly to a
+    /// Device, but a little slower.
     pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
         if self.device_id() != other.device_id() {
             if mode.monitor() {
@@ -159,9 +178,11 @@ impl Device {
         }
     }
 
-    #[allow(unused_must_use)]
+    /// Unlink with a line. This is safer than linking directly to a
+    /// Device, but a little slower.
     pub fn unlink_line(&self, other: &Line, mode: LinkMode) {
         if self.device_id() != other.device_id() {
+            #[allow(unused_must_use)]
             if mode.monitor() {
                 other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
             }
@@ -176,6 +197,7 @@ impl Device {
     /// Returns the first of (with a bias towards the former):
     /// * The next message to be received.
     /// * The result of the completed future.
+    /// * The crash of the Device.
     pub async fn watch<F, C>(&mut self, f: F)
                              -> Result<Watched<<F as Future>::Output>, Crash<C>>
     where F: Future + Unpin,
@@ -235,10 +257,9 @@ impl Device {
                         continue;
                     }
                 }
-                Ok(Messaged(Shutdown)) => {
-                    let id = self.device_id();
+                Ok(Messaged(Shutdown(id))) => {
                     self.disconnect(None);
-                    return Err(Crash::Shutdown(id));
+                    return Err(Crash::PowerOff(id));
                 }
                 Err(crash) => {
                     self.disconnect(Some(Fault::Error));
@@ -269,7 +290,7 @@ impl Device {
 impl Device {
     /// Spawns a computation with the Device on the global executor.
     ///
-    /// Note: Requires the 'smol' feature (default enabled)
+    /// Note: Requires the 'smol' feature (default enabled).
     pub fn spawn<P, F>(self, process: P) -> Line
     where P: FnOnce(Device) -> F,
           F: 'static + Future + Send
@@ -325,24 +346,24 @@ impl Stream for Device {
     }
 }
 
-/// A reference to a device that allows us to monitor it, be monitored
-/// by it or link with it (both monitor and be monitored).
+/// A reference to a `Device` that allows us to link with it.
 #[derive(Clone, Debug)]
 pub struct Line {
     pub(crate) plugboard: Arc<Plugboard>,
 }
 
 impl Line {
-    /// Get the ID of the Device on the other end of the Line
+    /// Get the ID of the Device this line is connected to.
     pub fn device_id(&self) -> DeviceID {
         DeviceID::new(&*self.plugboard as *const _ as usize)
     }
 
-    /// Send a message!
+    /// Send a message to the Device.
     pub fn send(self, message: Message) -> Result<(), Message> {
         self.plugboard.send(message)
     }
 
+    /// Links with another Line.
     pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
         if self.device_id() != other.device_id() {
             if mode.monitor() {
@@ -357,12 +378,14 @@ impl Line {
         }
     }
 
-    #[allow(unused_must_use)]
+    /// Links with another Line.
     pub fn unlink_line(&self, other: &Line, mode: LinkMode) {
         if self.device_id() != other.device_id() {
+            #[allow(unused_must_use)]
             if mode.monitor() {
                 other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
             }
+            #[allow(unused_must_use)]
             if mode.notify() {
                 self.plugboard.unplug(other.device_id(), LinkError::DeviceDown);
             }
