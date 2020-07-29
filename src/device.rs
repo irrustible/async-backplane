@@ -7,10 +7,11 @@ use std::cell::RefCell;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use crate::{Crash, DeviceID, Disconnect, Fault, Error, LinkError, LinkMode, Or, Report};
+use crate::*;
 use crate::linemap::LineMap;
 use crate::plugboard::Plugboard;
 use crate::utils::{biased_race, DontPanic};
+use std::fmt::Debug;
 
 /// A Device connects a Future to the backplane.
 #[derive(Debug)]
@@ -30,25 +31,59 @@ struct Inner {
 
 impl Inner {
     // Actually send all the messages
-    fn report(&mut self, report: Report<Option<Fault>>) {
-        let mut last: Option<Report<Option<Fault>>> = None; // avoid copying
+    fn send(&mut self, message: Message) {
+        let mut last: Option<Message> = None; // avoid copying
         for (_, maybe) in self.out.drain() {
             if let Some(line) = maybe {
-                let r = last.take().unwrap_or_else(|| report.clone());
-                if let Err(e) = line.report(r) { last = Some(e); }
+                let m = last.take().unwrap_or_else(|| message.clone());
+                if let Err(e) = line.send(m) { last = Some(e); }
             }
         }
     }
 }
 
-// The return type of `.watch()`
-pub type Watch<T, C=Error> = Result<Or<T, Disconnect>, Crash<C>>;
+#[derive(Debug)]
+pub enum Watched<T: Debug> {
+    Completed(T),
+    Messaged(Message),
+}
 
-// The return type of `.part_manage()`
-pub type PartManage<T, C=Error> = Result<(Device, T), Crash<C>>;
+pub use Watched::{Completed, Messaged};
 
-// The return type of `.manage()`
-pub type Manage<T, C=Error> = Result<T, Crash<C>>;
+impl<T: Debug> Watched<T> {
+    pub fn is_completed(&self) -> bool {
+        if let Messaged(_) = self { true } else { false }
+    }
+    pub fn is_messaged(&self) -> bool {
+        if let Messaged(_) = self { true } else { false }
+    }
+    pub fn completed(&self) -> Option<&T> {
+        if let Completed(c) = self { Some(&c) } else { None }
+    }
+    pub fn messaged(&self) -> Option<&Message> {
+        if let Messaged(m) = self { Some(&m) } else { None }
+    }
+    pub fn unwrap_completed(self) -> T {
+        if let Completed(c) = self { c }
+        else { panic!("Watched is not Completed"); }
+    }
+    pub fn unwrap_messaged(self) -> Message {
+        if let Messaged(m) = self { m }
+        else { panic!("Watched is not Messaged"); }
+    }
+}
+
+impl<T: Debug + PartialEq> PartialEq for Watched<T> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Completed(l), Completed(r)) => *l == *r,
+            (Messaged(l), Messaged(r)) => *l == *r,
+            _ => false,
+        }
+    }
+}
+
+impl<T: Debug + Eq> Eq for Watched<T> {}
 
 impl Device {
 
@@ -79,7 +114,7 @@ impl Device {
         self.plugboard.close(); // no more requests
         let mut inner = self.inner.borrow_mut();
         while let Ok(op) = self.plugboard.line_ops.pop() { inner.out.apply(op); } // sync
-        inner.report(Report::new(self.device_id(), fault));
+        inner.send(Disconnected(Report::new(self.device_id(), fault)));
     }
 
     pub fn link(&self, other: &Device, mode: LinkMode) {
@@ -138,51 +173,72 @@ impl Device {
         }
     }
 
-    /// Races the next disconnection from the Device and the provided
-    /// future (which is wrapped to protect against crash)
-    pub async fn watch<F, C>(&mut self, f: F) -> Watch<<F as Future>::Output, C>
-    where F: Future + Unpin, C: 'static + Any + Send {
+    /// Returns the first of (with a bias towards the former):
+    /// * The next message to be received.
+    /// * The result of the completed future.
+    pub async fn watch<F, C>(&mut self, f: F)
+                             -> Result<Watched<<F as Future>::Output>, Crash<C>>
+    where F: Future + Unpin,
+          F::Output: Debug,
+          C: 'static + Any + Debug + Send {
         let mut future = DontPanic::new(f);
         biased_race(
             async {
-                let update = self.next().await.expect("The Device to still be usable.");
-                Ok(Or::Right(update))
+                let message = self.next().await.expect("The Device to still be usable.");
+                Ok(Messaged(message))
             },
             async {
                 match (&mut future).await {
-                    Ok(val) => Ok(Or::Left(val)),
+                    Ok(val) => Ok(Completed(val)),
                     Err(unwind) => Err(Crash::Panic(unwind)),
                 }
             }
         ).await
     }
 
-    /// Runs an async closure while monitoring the self for crashes of
-    /// any monitored Devices. If self (or a Device being monitored)
-    /// crashes, announces that we have crashed to whoever is
-    /// monitoring us. If it does not crash, returns the original
-    /// Device for reuse along with the closure result.
-    pub async fn part_manage<'a, F, T, C>(mut self, mut f: F) -> PartManage<T, C>
-    where F: Future<Output = Result<T, C>> + Unpin, C: 'static + Send {
+    /// Runs an async closure while monitoring for messages. Messages
+    /// are handled as follows:
+    ///
+    /// * Disconnects without fault are ignored.
+    /// * Disconnects with fault cause the Device to fault.
+    /// * Requests to disconnect cause the Device to crash but
+    /// announce a successful completion.
+    ///
+    /// If the provided closure returns successfully, the result is
+    /// returned along with the Device for re-use. Monitors will *not*
+    /// be notified.
+    ///
+    /// If the Device faults, either because the provided closure
+    /// returned an Err variant or because a fault was propagated,
+    /// announces our fault to our monitors.
+    pub async fn part_manage<'a, F, T, C>(mut self, mut f: F)
+                                          -> Result<(Device, T), Crash<C>>
+    where F: Future<Output = Result<T, C>> + Unpin,
+          C: 'static + Debug + Send,
+          T: Debug {
         loop {
             match self.watch(&mut f).await {
-                Ok(Or::Left(Ok(val))) => {
-                    #[allow(unused_must_use)]
-                    if !self.inner.borrow_mut().out.detach(self.device_id()) {
-                        self.plugboard.unplug(self.device_id(), LinkError::LinkDown);
-                    }
-                    return Ok((self, val));
+                Ok(Completed(Ok(val))) => { return Ok((self, val)); }
+                Ok(Completed(Err(val))) => {
+                    self.disconnect(Some(Fault::Error));
+                    return Err(Crash::Error(val));
                 }
-                Ok(Or::Right(disco)) => {
+                Ok(Messaged(Disconnected(disco))) => {
                     if let Some(fault) = disco.result {
                         self.disconnect(Some(Fault::Cascade(disco.device_id)));
                         return Err(Crash::Cascade(Report::new(disco.device_id, fault)));
+                    } else {
+                        #[allow(unused_must_use)]
+                        if !self.inner.borrow_mut().out.detach(self.device_id()) {
+                            self.plugboard.unplug(self.device_id(), LinkError::LinkDown);
+                        }
+                        continue;
                     }
-                    continue;
                 }
-                Ok(Or::Left(Err(val))) => {
-                    self.disconnect(Some(Fault::Error));
-                    return Err(Crash::Error(val));
+                Ok(Messaged(Shutdown)) => {
+                    let id = self.device_id();
+                    self.disconnect(None);
+                    return Err(Crash::Shutdown(id));
                 }
                 Err(crash) => {
                     self.disconnect(Some(Fault::Error));
@@ -192,10 +248,12 @@ impl Device {
         }
     }
 
-    /// Like `part_manage()`, but in the case of successful
-    /// completion, notifies our monitors and consumes self
+    /// Like `part_manage()`, but in the case of successful completion
+    /// of the provided future, notifies our monitors and consumes self
     pub async fn manage<F, C, T>(self, f: F) -> Result<T, Crash<C>>
-    where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
+    where F: Future<Output=Result<T,C>> + Unpin,
+          C: 'static + Debug + Send,
+          T: Debug {
         match self.part_manage(f).await {
             Ok((device, val)) => {
                 device.disconnect(None);
@@ -204,17 +262,6 @@ impl Device {
             Err(e) => Err(e),
         }
     }
-
-    // /// Like `manage()`, but in the case of a crash, reports it to the
-    // /// provided Sender instead of returning it.
-    // pub async fn fully_manage<F, C, T>(self, sender: Sender<Report<Crash<C>>>, f: F)
-    // where F: Future<Output=Result<T,C>> + Unpin, C: 'static + Send {
-    //     let id = self.device_id();
-    //     #[allow(unused_must_use)] // we don't check the Result
-    //     if let Err(crash) = self.manage(f).await {
-    //         sender.send(Report::new(id, crash));
-    //     }
-    // }
 
 }
 
@@ -240,7 +287,7 @@ impl Drop for Device {
         if !inner.done {
             self.plugboard.close(); // no more requests
             while let Ok(op) = self.plugboard.line_ops.pop() { inner.out.apply(op); } // sync
-            inner.report(Report::new(self.device_id(), Some(Fault::Drop)));
+            inner.send(Disconnected(Report::new(self.device_id(), Some(Fault::Drop))));
         }
     }
  }
@@ -248,17 +295,17 @@ impl Drop for Device {
 impl Unpin for Device {}
 
 impl Stream for Device {
-    type Item = Disconnect;
+    type Item = Message;
     fn poll_next(self: Pin<&mut Self>, ctx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         let mut inner = this.inner.borrow_mut();
         if !inner.done {
-            match this.plugboard.disconnects.try_pop() {
+            match this.plugboard.messages.try_pop() {
                 Ok(val) => Poll::Ready(Some(val)),
                 Err(PopError::Empty) => {
-                    this.plugboard.disconnects.register(ctx.waker());
+                    this.plugboard.messages.register(ctx.waker());
                     // Make sure we don't lose out in a race
-                    match this.plugboard.disconnects.try_pop() {
+                    match this.plugboard.messages.try_pop() {
                         Ok(val) => Poll::Ready(Some(val)), // Sorry for leaving a waker
                         Err(PopError::Empty) => Poll::Pending,
                         Err(PopError::Closed) => {
@@ -291,9 +338,9 @@ impl Line {
         DeviceID::new(&*self.plugboard as *const _ as usize)
     }
 
-    /// Report disconnection
-    pub fn report(self, disconnect: Disconnect) -> Result<(), Disconnect> {
-        self.plugboard.notify(disconnect)
+    /// Send a message!
+    pub fn send(self, message: Message) -> Result<(), Message> {
+        self.plugboard.send(message)
     }
 
     pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
@@ -306,7 +353,7 @@ impl Line {
             }
             Ok(())
         } else {
-            Err(LinkError::CantLinkSelf)
+            panic!("Do not link to yourself.");
         }
     }
 

@@ -8,53 +8,10 @@ mod device;
 mod linemap;
 
 pub use anyhow::{anyhow as error, bail as crash, ensure, Error};
-pub use device::{Device, Line, Manage, PartManage, Watch};
+pub use device::{Device, Line, Watched, Completed, Messaged};
 
 use maybe_unwind::Unwind;
 use std::fmt::Display;
-
-/// Like 'Result', but with no semantic meaning
-#[derive(Debug)]
-pub enum Or<L, R> {
-    Left(L),
-    Right(R),
-}
-
-impl<L, R> Or<L, R> {
-    pub fn is_left(&self) -> bool {
-        if let Or::Left(_) = self { true } else { false }
-    }
-    pub fn is_right(&self) -> bool {
-        if let Or::Right(_) = self { true } else { false }
-    }
-    pub fn unwrap_left(self) -> Option<L> {
-        if let Or::Left(l) = self { Some(l) } else { None }
-    }
-    pub fn unwrap_right(self) -> Option<R> {
-        if let Or::Right(r) = self { Some(r) } else { None }
-    }
-}
-
-impl<L: PartialEq, R: PartialEq> PartialEq for Or<L, R> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Or::Left(l), Or::Left(r)) => l == r,
-            (Or::Right(l), Or::Right(r)) => l == r,
-            _ => false,
-        }
-    }
-}
-
-impl<L: Clone, R: Clone> Clone for Or<L, R> {
-    fn clone(&self) -> Self {
-        match self {
-            Or::Left(l) => Or::Left(l.clone()),
-            Or::Right(r) => Or::Right(r.clone()),
-        }
-    }
-}
-
-impl<L: Eq, R: Eq> Eq for Or<L, R> {}
 
 /// A locally unique identifier for a Device
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -89,6 +46,8 @@ impl<T: Clone> Clone for Report<T> {
     }
 }
 
+impl<T: Copy> Copy for Report<T> {}
+
 impl<T: PartialEq> PartialEq for Report<T> {
     fn eq(&self, other: &Self) -> bool {
         (self.device_id == other.device_id) &&
@@ -105,8 +64,6 @@ pub enum LinkError {
     DeviceDown,
     /// We can't because the other Device is down
     LinkDown,
-    /// We can't link to ourselves
-    CantLinkSelf,
 }
 
 /// The device has dropped off the backplane unexpectedly
@@ -159,16 +116,34 @@ impl LinkMode {
     }
 }
 
-type Disconnect = Report<Option<Fault>>;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Message {
+    /// A Device we are monitoring has disconnected.
+    Disconnected(Report<Option<Fault>>),
+    /// Request to stop running.
+    Shutdown,
+}
+
+pub use Message::{Disconnected, Shutdown};
+
+impl Message {
+    pub fn unwrap_disconnected(self) -> Report<Option<Fault>> {
+        if let Disconnected(report) = self { report }
+        else { panic!("Message was not Disconnected") }
+    }
+}
+
 
 /// Something went wrong with a Device
 #[derive(Debug)]
 pub enum Crash<C=Error> {
+    /// We were asked to shut down.
+    Shutdown(DeviceID),
     /// The Device panicked.
     Panic(Unwind),
-    /// The Device returned an Err
+    /// The Device returned an Err.
     Error(C),
-    /// A device we depend upon disconnected
+    /// A device we depend upon disconnected.
     Cascade(Report<Fault>),
 }
 
@@ -201,11 +176,12 @@ impl<C> Crash<C> {
     }
 
     /// Creates a disconnect representing this Crash.
-    pub fn as_disconnect(&self) -> Fault {
+    pub fn as_disconnect(&self) -> Option<Fault> {
         match self {
-            Crash::Panic(_) => Fault::Error,
-            Crash::Error(_) => Fault::Error,
-            Crash::Cascade(report) => Fault::Cascade(report.device_id),
+            Crash::Shutdown(_) => None,
+            Crash::Panic(_) => Some(Fault::Error),
+            Crash::Error(_) => Some(Fault::Error),
+            Crash::Cascade(report) => Some(Fault::Cascade(report.device_id)),
         }
     }
 
