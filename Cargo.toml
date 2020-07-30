@@ -12,16 +12,10 @@ authors = ["James Laver <james.laver@gmail.com>"]
 edition = "2018"
 readme = "README.md"
 
-[features]
-default = ["smol"]
-nightly = []
-
 [dependencies]
-anyhow = "1.0.31"
 atomic-waker = "1.0"
 concurrent-queue = "1.1"
 futures-lite = "0.1.5"
 maybe-unwind = "0.3"
 pin-project-lite = "0.1"
 waker-queue = "0.1"
-smol = { version = "0.3", optional = true }

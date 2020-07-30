@@ -1,5 +1,3 @@
-#[cfg(feature = "smol")]
-use smol::Task;
 use concurrent_queue::PopError;
 use futures_lite::{Future, Stream, StreamExt};
 use std::any::Any;
@@ -8,6 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use crate::*;
+use crate::Watched::{Completed, Messaged};
 use crate::linemap::LineMap;
 use crate::plugboard::Plugboard;
 use crate::utils::{biased_race, DontPanic};
@@ -24,7 +23,7 @@ pub struct Device {
 }
 
 #[derive(Debug)]
-struct Inner {
+pub(crate) struct Inner {
     out: LineMap,
     done: bool,
 }
@@ -41,54 +40,6 @@ impl Inner {
         }
     }
 }
-
-/// A result from `watch()`.
-#[derive(Debug)]
-pub enum Watched<T: Debug> {
-    /// The provided Future completed.
-    Completed(T),
-    /// A message was received.
-    Messaged(Message),
-}
-
-use Watched::{Completed, Messaged};
-
-impl<T: Debug> Watched<T> {
-
-    /// True if the future completed.
-    pub fn is_completed(&self) -> bool {
-        if let Messaged(_) = self { true } else { false }
-    }
-
-    /// True if we received a message.
-    pub fn is_messaged(&self) -> bool {
-        if let Messaged(_) = self { true } else { false }
-    }
-
-    /// Take the completed result or panic.
-    pub fn unwrap_completed(self) -> T {
-        if let Completed(c) = self { c }
-        else { panic!("Watched is not Completed"); }
-    }
-
-    /// Take the received message or panic.
-    pub fn unwrap_messaged(self) -> Message {
-        if let Messaged(m) = self { m }
-        else { panic!("Watched is not Messaged"); }
-    }
-}
-
-impl<T: Debug + PartialEq> PartialEq for Watched<T> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Completed(l), Completed(r)) => *l == *r,
-            (Messaged(l), Messaged(r)) => *l == *r,
-            _ => false,
-        }
-    }
-}
-
-impl<T: Debug + Eq> Eq for Watched<T> {}
 
 impl Device {
 
@@ -118,8 +69,9 @@ impl Device {
     fn do_disconnect(&self, fault: Option<Fault>) {
         self.plugboard.close(); // no more requests
         let mut inner = self.inner.borrow_mut();
-        while let Ok(op) = self.plugboard.line_ops.pop() { inner.out.apply(op); } // sync
-        inner.send(Disconnected(Report::new(self.device_id(), fault)));
+        while let Ok(op) = self.plugboard.line_ops.pop() {
+            inner.out.apply(op); } // sync
+        inner.send(Disconnected(self.device_id(), fault));
     }
 
     /// Link with another Device with the provided LinkMode. LinkModes
@@ -245,17 +197,16 @@ impl Device {
                     self.disconnect(Some(Fault::Error));
                     return Err(Crash::Error(val));
                 }
-                Ok(Messaged(Disconnected(disco))) => {
-                    if let Some(fault) = disco.result {
-                        self.disconnect(Some(Fault::Cascade(disco.device_id)));
-                        return Err(Crash::Cascade(Report::new(disco.device_id, fault)));
-                    } else {
-                        #[allow(unused_must_use)]
-                        if !self.inner.borrow_mut().out.detach(self.device_id()) {
-                            self.plugboard.unplug(self.device_id(), LinkError::LinkDown);
-                        }
-                        continue;
+                Ok(Messaged(Disconnected(sender, Some(fault)))) => {
+                    self.disconnect(Some(Fault::Cascade(sender)));
+                    return Err(Crash::Cascade(sender, fault));
+                }
+                Ok(Messaged(Disconnected(sender, None))) => {
+                    #[allow(unused_must_use)]
+                    if !self.inner.borrow_mut().out.detach(sender) {
+                        self.plugboard.unplug(sender, LinkError::LinkDown);
                     }
+                    continue;
                 }
                 Ok(Messaged(Shutdown(id))) => {
                     self.disconnect(None);
@@ -286,29 +237,13 @@ impl Device {
 
 }
 
-#[cfg(feature = "smol")]
-impl Device {
-    /// Spawns a computation with the Device on the global executor.
-    ///
-    /// Note: Requires the 'smol' feature (default enabled).
-    pub fn spawn<P, F>(self, process: P) -> Line
-    where P: FnOnce(Device) -> F,
-          F: 'static + Future + Send
-    {
-        let line = self.line();
-        let p = process(self);
-        Task::spawn(async move { p.await; }).detach();
-        line
-    }
-}
-
 impl Drop for Device {
     fn drop(&mut self) {
         let mut inner = self.inner.borrow_mut();
         if !inner.done {
             self.plugboard.close(); // no more requests
             while let Ok(op) = self.plugboard.line_ops.pop() { inner.out.apply(op); } // sync
-            inner.send(Disconnected(Report::new(self.device_id(), Some(Fault::Drop))));
+            inner.send(Disconnected(self.device_id(), Some(Fault::Drop)));
         }
     }
  }
@@ -343,62 +278,5 @@ impl Stream for Device {
         } else {
             Poll::Ready(None)
         }
-    }
-}
-
-/// A reference to a `Device` that allows us to link with it.
-#[derive(Clone, Debug)]
-pub struct Line {
-    pub(crate) plugboard: Arc<Plugboard>,
-}
-
-impl Line {
-    /// Get the ID of the Device this line is connected to.
-    pub fn device_id(&self) -> DeviceID {
-        DeviceID::new(&*self.plugboard as *const _ as usize)
-    }
-
-    /// Send a message to the Device.
-    pub fn send(self, message: Message) -> Result<(), Message> {
-        self.plugboard.send(message)
-    }
-
-    /// Links with another Line.
-    pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
-        if self.device_id() != other.device_id() {
-            if mode.monitor() {
-                other.plugboard.plug(self.clone(), LinkError::LinkDown)?;
-            }
-            if mode.notify() {
-                self.plugboard.plug(other, LinkError::DeviceDown)?;
-            }
-            Ok(())
-        } else {
-            panic!("Do not link to yourself.");
-        }
-    }
-
-    /// Links with another Line.
-    pub fn unlink_line(&self, other: &Line, mode: LinkMode) {
-        if self.device_id() != other.device_id() {
-            #[allow(unused_must_use)]
-            if mode.monitor() {
-                other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
-            }
-            #[allow(unused_must_use)]
-            if mode.notify() {
-                self.plugboard.unplug(other.device_id(), LinkError::DeviceDown);
-            }
-        }
-    }
-}
-
-impl Eq for Line {}
-
-impl Unpin for Line {}
-
-impl PartialEq for Line {
-    fn eq(&self, other: &Line) -> bool {
-        Arc::ptr_eq(&self.plugboard, &other.plugboard)
     }
 }
