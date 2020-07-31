@@ -4,141 +4,234 @@
 <!-- [![Package](https://img.shields.io/crates/v/async-backplane.svg)](https://crates.io/crates/async-backplane) -->
 <!-- [![Documentation](https://docs.rs/async-backplane/badge.svg)](https://docs.rs/async-backplane) -->
 
-Simple, Erlang-inspired reliability backplane for Rust Futures.
+Easy, Erlang-inspired fault-tolerance framework for Rust Futures.
+
+Features:
+
+* The secrets of Erlang's legendary reliability.
+* Idiomatic Rust API with low-level control.
+* Simple. Easy to learn and use.
+* Plays nicely with the existing Futures Ecosystem
+* Uses no unstable features or unsafe code.
+* High performance and (relatively) low memory
+* Lightweight: ~600 lines of code, 6 deps, fresh build in seconds. 
+* No `Box<dyn Any>`, LOL.
 
 ## Status.
 
-Beta. We're delighted with it, but we're still testing and polishing.
+Beta quality. Everything appears to work correctly, but we want to
+write more tests before we feel confident it is correct. I have fixed
+little bugs as I've noticed them, so clearly we needed better tests.
 
-## Overview
+The API may change slightly before the initial crates release, but
+nothing major, I hope. Broadly speaking, I'm delighted with it, I'm
+just polishing it up and trying to make the documentation less awful.
 
-A Future that wishes to participate in the backplane creates a
-`Device`, which may be linked to other devices to exchange termination
-information. There are three types of link:
+## Guide
 
-* Monitor - be notified when the other Device terminates.
-* Notify - notify the other Device when this Device terminates.
-* Peer - equivalent to Monitor + Notify.
+The Backplane (that's a fancy word for 'motherboard') is a dynamic
+mesh of `Device`s. The `Device` object is a Future's connection into
+the Backplane. It maintains connections to other Devices, such that
+when we disconnect (complete), we notify them. We can connect to
+another device with `Device.link()`, passing a `LinkMode`, of which
+there are three:
 
-A Device may terminate successfully or with an error. Monitoring
-devices may react to an error by themselves terminating with an error
-or they may choose to take corrective action. This is the basis for
-building reliable applications with async_backplane.
+* `Monitor` - be notified when the other Device disconnects.
+* `Notify` - notify the other Device when this Device disconnects.
+* `Peer` - both notify each other when they disconnect.
 
-## Example usage
+The way we react to these disconnections is what makes our
+applications reliable. Erlang's equivalent of a spawned future, a
+`process`, is categorised according to how they handle errors:
+
+* `worker` processes notified of a failure will fail themselves
+* `supervisor` processes notified of a completion will apply some sort
+  of logic to restart processes under their supervision.
+
+In async-backplane, `worker` corresponds to the `Device.manage()`
+method. Here's an example using the 'smol' futures executor:
 
 ```rust
 use async_backplane::*;
-use futures_lite::future::pending;
+use smol::Task;
 
-fn main() {
-    let d1 = Device::new();
-    d1.spawn(|d1| {
-        async { // We will restart a child until it succeeds
-            loop {
-                let d2 = Device::new();
-                // d1 will hear about d2's termination
-                d1.link(&d2, LinkMode::Monitor);
-                d2.spawn(|d| async {// spawns on the executor, requires smol
-                    d.manage(|| {
-                        // your code goes here...
-                        Err(()) // This will cause the device to fail
-                    }).await;
-                });
-                ///
-                match d.watch(|| pending(())).await {
-                    Ok(Or::Left(())) => { return Ok(()); }
-                    Ok(Or::Right(report)) => {
-                        if !report.inner.is_some() {
-                            return Ok(()); // Done!
-                        }
-                    }
-                    /// This is *us* panicking. Can't see how...
-                    Err(crash) => { return Err(crash); }
-                }
-            }
-        }
-    });
+fn example() {
+    let device = Device::new();
+    Task::spawn(async move {
+        device.manage(async { ... });
+    }).detach();
 }
 ```
 
-## Reliability patterns
+There are three logical steps here:
+* Creating the Device (`Device::new()`).
+* Spawning a Future on the executor (`Task::spawn(...).detach()`).
+* In the spawned Future, putting the Device into managed mode
+  with an async block to execute (`device.manage(async { ... }`)`
 
-There are three methods on `Device` that help you to build reliable
-applications. All of them:
+Managed devices will run until the first of:
+* The async block returning a result.
+* The async block unwind panicking.
+* A Device sending us a message:
+  * On receiving a shutdown request, complete successfully.
+  * On receiving a disconnect notification that is fatal, fault.
 
-* Wrap the provided future such that it catches unwind panics.
-* Polls the device for disconnections of linked devices.
+The async block you provide should return a `Result` of some kind. If
+you return `Ok`, the Device will be considered to have successfully
+completed its work. If you return `Err`, the Device will be considered
+to have faulted.
 
-The most useful one of these is `manage`. It consumes a Device,
-wrapping a provided future to:
+When any of these conditions has occurred, the Device will notify all
+Devices which are monitoring us of our status and the Device will be
+dropped. The `manage()` method returns a `Result<T, Crash<C>>` where T
+is the success type of the Result returned by the async block. C is
+the error type for the same Result returned by the async
+block. `Crash` is just an enum with an arm for each kind of failure.
 
-* Catch unwind panics during execution and promotes them into faults.
-* Promote returning `Ok()` into a success.
-* Promote returning `Err()` into a fault.
-* Listen for disconnects from monitored devices:
-  * If successful, remove it from our monitors list if present.
-  * If it faulted, cascade the fault (fault in sympathy).
-* Notifies monitors of our disconnect with our success/fault status.
+I'm still trying to work out what to do with crashes. I don't want
+this library to be too opinionated or to bloat the dependency tree too
+much. Maybe I'll do an opinionated library that uses this one, or
+maybe you'll just create your own `manage_panic()` function in each
+project and use that? Suggestions gratefully received!
 
-`part_manage` is a temporary version of `manage`. It will not notify
-monitors in the event of returning `Ok()` as it is assumed you will
-wish to continue with the Device. In in case of fault, still notifies.
+### Recovery
 
-`watch` is for building more complex behaviours. It protects against
-unwind panics and monitors other devices for failure, but it just
-returns the first of the provided future and the next disconnect to
-occur.
+`Device.watch()` is the tool for building more complex behaviours. It
+protects against unwind panics and listens for disconnects, but it
+just returns the first of the provided future's result and the next
+disconnect to occur.
 
 One of the more useful things you can do with watch is recreate
-futures that have failed. Be sure to link appropriately!
+futures that have failed. Indeed, this is how erlang Supervisors work!
+
+There's lot of work still to do here. Much of it will probably be in
+libraries that build on top of this one.
+
+### Static link topologies
+
+Devices can be linked together by calling their `link()` method. They
+take a `LinkMode` as described back at the start of the guide. Example:
+
+```rust
+use async_backplane::*;
+
+fn demo() {
+    let a = Device::new();
+    let b = Device::new();
+    let c = Device::new();
+    a.link(b, LinkMode::Peer);
+    b.link(c, LinkMode::Peer);
+    // ... now go spawn them all ...
+}
+```
+
+### Dynamic link topologies
+
+Most of our Devices will be running in managed mode after they have
+been set up. Managed mode takes ownership of our `Device`, so how do
+we link? Enter the `Line`, a reference to a `Device` that can be
+cloned and passed around freely.
+
+Getting a `Line` is simple: `device.line()`. Linking to a `Line` from
+a `Device` is much like linking to a `Device`, except we call
+`link_line()` instead of `link()`. Unlike `link()`, it may fail
+because the `Device` the line is connected to has disconnected, so it
+returns a `Result`.
+
+You can link between `Lines` directly as well: `Line` also has a
+`link_line()` method:
+
+```rust
+use async_backplane::*;
+
+fn demo() {
+    let a = Device::new();
+    let b = Device::new();
+    let c = Device::new();
+    let c2 = c.line();
+    let d = Device::new();
+    let d2 = d.line();
+    a.link(b, LinkMode::Peer);
+    b.link_line(c2, LinkMode::Peer).unwrap();
+    c2.link_line(d2, LinkMode::Peer).unwrap();
+    // ... now go spawn them all ...
+}
+```
+
+#### A note of caution on mixed topologies
+
+Once you have linked with something through a `Line`, you should only
+unlink it through the `Line`. Device-to-Device linkage is fast because
+it avoids the work that would make it handle this case correctly. In
+general, you should only link or unlink with `Device`s when you know
+you have not previously linked with the corresponding `Line`s.
 
 ## Relationship to Erlang/OTP
 
 async-backplane does not implement actors, only links and monitors. It
 is a lower level tool that allows for a wider range of usage
-patterns. You could build actors (and other things!) on top of this. I
-will be doing that very soon.
+patterns. You could build actors (and other things!) on top of this. 
+
+## Library pairing recommendations
+
+These work great alongside `async-backplane`:
+
+* [async-channel](https://github.com/stjepang/async-channel/) - great
+  all-purpose async-aware channel.
+* [smol](https://github.com/stjepang/smol/) - small, high-performance
+  multithreaded futures executor.
+
+## Forthcoming work
+
+Note: these will likely be new libraries, linked from here when public.
+
+* Supervisors and recovery mechanisms.
+* Actors.
+* no_std support.
 
 ## Performance
 
 These numbers are random unscientific benchmark measurements from my
 shitty 2015 macbook pro. Your numbers may be different. Run the
-benchmarks, or better still bench your real world code using it.
+benchmarks, or better still, bench your real world code using it.
 
 ```
+     Running target/release/deps/device-8add01b9803770b5
+
 running 11 tests
-test create_destroy              ... bench:         203 ns/iter (+/- 35)
-test device_monitor_drop         ... bench:         524 ns/iter (+/- 52)
-test device_monitor_drop_notify  ... bench:         698 ns/iter (+/- 87)
-test device_monitor_error_notify ... bench:         726 ns/iter (+/- 63)
-test device_peer_drop_notify     ... bench:         897 ns/iter (+/- 130)
-test device_peer_error_notify    ... bench:         948 ns/iter (+/- 147)
-test line_monitor_drop           ... bench:         775 ns/iter (+/- 161)
-test line_monitor_drop_notify    ... bench:         914 ns/iter (+/- 80)
-test line_monitor_error_notify   ... bench:         947 ns/iter (+/- 133)
-test line_peer_drop_notify       ... bench:       1,037 ns/iter (+/- 151)
-test line_peer_error_notify      ... bench:       1,083 ns/iter (+/- 132)
+test create_destroy              ... bench:         212 ns/iter (+/- 9)
+test device_monitor_drop         ... bench:         585 ns/iter (+/- 64)
+test device_monitor_drop_notify  ... bench:         771 ns/iter (+/- 39)
+test device_monitor_error_notify ... bench:         798 ns/iter (+/- 39)
+test device_peer_drop_notify     ... bench:         964 ns/iter (+/- 40)
+test device_peer_error_notify    ... bench:         941 ns/iter (+/- 304)
+test line_monitor_drop           ... bench:         805 ns/iter (+/- 48)
+test line_monitor_drop_notify    ... bench:         975 ns/iter (+/- 48)
+test line_monitor_error_notify   ... bench:         993 ns/iter (+/- 55)
+test line_peer_drop_notify       ... bench:       1,090 ns/iter (+/- 62)
+test line_peer_error_notify      ... bench:       1,181 ns/iter (+/- 65)
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 11 measured; 0 filtered out
 
-     Running target/release/deps/line-3578157f35e6c856
+     Running target/release/deps/line-c87021ef05fddd66
 
 running 6 tests
-test create_destroy            ... bench:          13 ns/iter (+/- 2)
-test line_monitor_drop         ... bench:         722 ns/iter (+/- 79)
-test line_monitor_drop_notify  ... bench:         916 ns/iter (+/- 144)
-test line_monitor_error_notify ... bench:         958 ns/iter (+/- 171)
-test line_peer_drop_notify     ... bench:       1,225 ns/iter (+/- 168)
-test line_peer_error_notify    ... bench:       1,238 ns/iter (+/- 174)
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 6 measured; 0 filtered out
+test create_destroy            ... bench:          13 ns/iter (+/- 4)
+test line_monitor_drop         ... bench:         793 ns/iter (+/- 51)
+test line_monitor_drop_notify  ... bench:         968 ns/iter (+/- 357)
+test line_monitor_error_notify ... bench:       1,018 ns/iter (+/- 54)
+test line_peer_drop_notify     ... bench:       1,343 ns/iter (+/- 70)
+test line_peer_error_notify    ... bench:       1,370 ns/iter (+/- 77)
 ```
 
-Conclusions:
+Note that when linking, it is cheaper to use a Device than a Line, that is:
 
-* We're pretty fast! Imagine how fast we'll be when it's optimised...
-* Prefer Devices over Lines where speed is essential.
+* `device.link()` is fastest.
+* `device.link_line()` is slightly more expensive.
+* `line.link_line()` is slightly more expensive still.
+
+If performance really matters, do not use dynamic topologies. Also
+spend some time microoptimising this library, because we didn't yet.
 
 ## Copyright and License
 
