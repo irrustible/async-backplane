@@ -23,6 +23,8 @@ pub use watched::Watched;
 mod plugboard;
 mod linemap;
 
+// These are small, here will be fine.
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// There was a problem Linking
 pub enum LinkError {
@@ -32,7 +34,7 @@ pub enum LinkError {
     LinkDown,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone, Copy)]
 #[repr(u32)]
 /// How deeply should we link?
 pub enum LinkMode {
