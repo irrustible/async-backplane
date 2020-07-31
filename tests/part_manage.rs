@@ -1,10 +1,9 @@
 use async_backplane::*;
-use futures_lite::future::{pending, ready, block_on};
+use futures_lite::future::{block_on, pending, ready};
 use std::thread::{spawn, JoinHandle};
 
 #[test]
 fn solo_succeeds() {
-
     let d1 = Device::new();
     let did = d1.device_id();
     let t1: JoinHandle<Result<(Device, ()), Crash<()>>> =
@@ -114,7 +113,8 @@ fn peer_device_crashes() {
 #[test]
 fn peer_device_drops() {
     let d1 = Device::new();
-    let device_id = { // d2 won't survive this block
+    let device_id = {
+        // d2 won't survive this block
         let d2 = Device::new();
         d1.link(&d2, LinkMode::Peer);
         d2.device_id()
@@ -137,7 +137,8 @@ fn monitored_line_succeeds() {
     let d2 = Device::new();
     let device_id = d2.device_id();
     let line = d1.line();
-    d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
+    d2.link_line(line, LinkMode::Monitor)
+        .expect("to link successfully");
 
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
@@ -155,7 +156,8 @@ fn monitored_line_errors() {
     let d2 = Device::new();
     let device_id = d1.device_id();
     let line = d1.line();
-    d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
+    d2.link_line(line, LinkMode::Monitor)
+        .expect("to link successfully");
     let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
     let t2: JoinHandle<Result<(Device, ()), Crash<()>>> =
         spawn(move || block_on(d2.part_manage(pending())));
@@ -176,7 +178,8 @@ fn monitored_line_drops() {
         let d1 = Device::new();
         let id = d1.device_id();
         let line = d1.line();
-        d2.link_line(line, LinkMode::Monitor).expect("to link successfully");
+        d2.link_line(line, LinkMode::Monitor)
+            .expect("to link successfully");
         id
     };
     let t: JoinHandle<Result<(Device, ()), Crash<()>>> =
@@ -196,7 +199,8 @@ fn peer_line_succeeds() {
     let d2 = Device::new();
     let device_id = d2.device_id();
     let line = d2.line();
-    d1.link_line(line, LinkMode::Peer).expect("to link successfully");
+    d1.link_line(line, LinkMode::Peer)
+        .expect("to link successfully");
 
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
@@ -210,12 +214,12 @@ fn peer_line_succeeds() {
 
 #[test]
 fn peer_line_crashes() {
-
     let d1 = Device::new();
     let d2 = Device::new();
     let device_id = d2.device_id();
     let line = d2.line();
-    d1.link_line(line, LinkMode::Peer).expect("to link successfully");
+    d1.link_line(line, LinkMode::Peer)
+        .expect("to link successfully");
 
     let t1 = spawn(move || d2.disconnect(Some(Fault::Error)));
     let t2: JoinHandle<Result<(Device, ()), Crash<()>>> =
@@ -233,12 +237,13 @@ fn peer_line_crashes() {
 
 #[test]
 fn peer_line_drops() {
-
     let d1 = Device::new();
-    let device_id = { // d2 won't survive this block
+    let device_id = {
+        // d2 won't survive this block
         let d2 = Device::new();
         let line = d2.line();
-        d1.link_line(line, LinkMode::Peer).expect("to link successfully");
+        d1.link_line(line, LinkMode::Peer)
+            .expect("to link successfully");
         d2.device_id()
     };
 
@@ -252,4 +257,3 @@ fn peer_line_drops() {
         unreachable!();
     }
 }
-

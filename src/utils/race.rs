@@ -9,7 +9,7 @@ where
     A: Future<Output = T>,
     B: Future<Output = T>,
 {
-   BiasedRace { future1, future2 }
+    BiasedRace { future1, future2 }
 }
 
 pin_project! {

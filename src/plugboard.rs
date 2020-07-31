@@ -1,9 +1,7 @@
-use concurrent_queue::ConcurrentQueue;
-use crate::{DeviceID, Message, Line, LinkError};
 use crate::linemap::LineOp;
+use crate::{DeviceID, Line, LinkError, Message};
+use concurrent_queue::ConcurrentQueue;
 use waker_queue::WakerQueue;
-
-
 
 #[derive(Debug)]
 pub(crate) struct Plugboard {
@@ -12,7 +10,6 @@ pub(crate) struct Plugboard {
 }
 
 impl Plugboard {
-
     pub fn new() -> Self {
         Plugboard {
             line_ops: ConcurrentQueue::unbounded(),
@@ -32,13 +29,14 @@ impl Plugboard {
 
     // Send a message down the line.
     pub fn send(&self, message: Message) -> Result<(), Message> {
-        self.messages.try_push_wake(message, true).map_err(|e| e.into_inner())
+        self.messages
+            .try_push_wake(message, true)
+            .map_err(|e| e.into_inner())
     }
 
     // Stop taking requests
     pub fn close(&self) {
         self.line_ops.close();
         self.messages.close();
-    } 
-
+    }
 }

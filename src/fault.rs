@@ -12,16 +12,22 @@ pub enum Fault {
 }
 
 impl Fault {
-
     /// Did the Device drop without being scheduled?
-    pub fn is_drop(&self) -> bool { *self == Fault::Drop }
+    pub fn is_drop(&self) -> bool {
+        *self == Fault::Drop
+    }
 
     /// Did we return an Err or panic or something awful?
-    pub fn is_error(&self) -> bool { *self == Fault::Error }
+    pub fn is_error(&self) -> bool {
+        *self == Fault::Error
+    }
 
     /// Are we a cascade fault?
     pub fn is_cascade(&self) -> bool {
-        if let Fault::Cascade(_) = self { true } else { false }
+        if let Fault::Cascade(_) = self {
+            true
+        } else {
+            false
+        }
     }
-    
 }

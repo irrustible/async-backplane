@@ -1,12 +1,11 @@
 use async_backplane::*;
-use futures_lite::future::{pending, ready, block_on};
+use futures_lite::future::{block_on, pending, ready};
 use std::thread::{spawn, JoinHandle};
 
 #[test]
 fn solo_succeeds() {
     let d = Device::new();
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d.manage(ready(Ok(())))));
+    let t: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d.manage(ready(Ok(())))));
     assert_eq!((), t.join().unwrap().expect("success"));
 }
 
@@ -19,8 +18,7 @@ fn monitored_device_succeeds() {
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
 
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(ready(Ok(())))));
+    let t2: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(ready(Ok(())))));
     assert_eq!((), t2.join().unwrap().expect("success"));
 }
 
@@ -34,11 +32,9 @@ fn monitored_line_succeeds() {
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
 
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(ready(Ok(())))));
+    let t2: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(ready(Ok(())))));
     assert_eq!((), t2.join().unwrap().expect("success"));
 }
-
 
 #[test]
 fn monitored_device_crashes() {
@@ -47,8 +43,7 @@ fn monitored_device_crashes() {
     let device_id = d1.device_id();
     d2.link(&d1, LinkMode::Monitor);
     let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
+    let t2: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(pending())));
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
     if let Crash::Cascade(did, result) = crash {
@@ -67,8 +62,7 @@ fn monitored_line_crashes() {
     let line = d1.line();
     d2.link_line(line, LinkMode::Monitor).expect("link");
     let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
+    let t2: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(pending())));
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
     if let Crash::Cascade(did, result) = crash {
@@ -88,8 +82,7 @@ fn monitored_device_drops() {
         d2.link(&d1, LinkMode::Monitor);
         id
     };
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
+    let t: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
     if let Crash::Cascade(did, result) = crash {
         assert_eq!(did, device_id);
@@ -109,8 +102,7 @@ fn monitored_line_drops() {
         d2.link_line(line, LinkMode::Monitor).expect("link");
         id
     };
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
+    let t: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
     if let Crash::Cascade(did, result) = crash {
         assert_eq!(did, device_id);
@@ -129,8 +121,7 @@ fn peer_device_succeeds() {
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
 
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(ready(Ok(())))));
+    let t2: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(ready(Ok(())))));
     assert_eq!((), t2.join().unwrap().expect("success"));
 }
 
@@ -144,11 +135,9 @@ fn peer_line_succeeds() {
     let t1 = spawn(move || d1.disconnect(None));
     assert_eq!((), t1.join().unwrap());
 
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(ready(Ok(())))));
+    let t2: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(ready(Ok(())))));
     assert_eq!((), t2.join().unwrap().expect("success"));
 }
-
 
 #[test]
 fn peer_device_crashes() {
@@ -157,8 +146,7 @@ fn peer_device_crashes() {
     let device_id = d1.device_id();
     d2.link(&d1, LinkMode::Peer);
     let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
+    let t2: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(pending())));
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
     if let Crash::Cascade(did, result) = crash {
@@ -177,8 +165,7 @@ fn peer_line_crashes() {
     let line = d1.line();
     d2.link_line(line, LinkMode::Peer).expect("link");
     let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
+    let t2: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(pending())));
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
     if let Crash::Cascade(did, result) = crash {
@@ -198,8 +185,7 @@ fn peer_device_drops() {
         d2.link(&d1, LinkMode::Peer);
         id
     };
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
+    let t: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
     if let Crash::Cascade(did, result) = crash {
         assert_eq!(did, device_id);
@@ -219,8 +205,7 @@ fn peer_link_drops() {
         d2.link_line(line, LinkMode::Peer).expect("link");
         id
     };
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
+    let t: JoinHandle<Result<(), Crash<()>>> = spawn(move || block_on(d2.manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
     if let Crash::Cascade(did, result) = crash {
         assert_eq!(did, device_id);
@@ -229,4 +214,3 @@ fn peer_link_drops() {
         unreachable!();
     }
 }
-

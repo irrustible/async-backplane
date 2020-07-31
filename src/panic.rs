@@ -1,12 +1,14 @@
 //! Panic handler installer functions for better debugging.
 //!
 //! Call only *one* of these, only once per thread.
-use std::panic;
 use maybe_unwind::capture_panic_info;
+use std::panic;
 
 /// Sets the thread local panic handler to record the unwind information
 pub fn replace_panic_hook() {
-    panic::set_hook(Box::new(|info| { capture_panic_info(info); }));
+    panic::set_hook(Box::new(|info| {
+        capture_panic_info(info);
+    }));
 }
 
 /// Sets the thread local panic handler to record the unwind information
