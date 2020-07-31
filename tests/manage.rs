@@ -51,9 +51,9 @@ fn monitored_device_crashes() {
         spawn(move || block_on(d2.manage(pending())));
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(report) = crash {
-        assert_eq!(report.device_id, device_id);
-        assert!(report.result.is_error());
+    if let Crash::Cascade(did, result) = crash {
+        assert_eq!(did, device_id);
+        assert!(result.is_error());
     } else {
         unreachable!();
     }
@@ -71,9 +71,9 @@ fn monitored_line_crashes() {
         spawn(move || block_on(d2.manage(pending())));
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(report) = crash {
-        assert_eq!(report.device_id, device_id);
-        assert!(report.result.is_error());
+    if let Crash::Cascade(did, result) = crash {
+        assert_eq!(did, device_id);
+        assert!(result.is_error());
     } else {
         unreachable!();
     }
@@ -91,9 +91,9 @@ fn monitored_device_drops() {
     let t: JoinHandle<Result<(), Crash<()>>> =
         spawn(move || block_on(d2.manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(report) = crash {
-        assert_eq!(device_id, report.device_id);
-        assert_eq!(report.result, Fault::Drop);
+    if let Crash::Cascade(did, result) = crash {
+        assert_eq!(did, device_id);
+        assert!(result.is_drop());
     } else {
         unreachable!();
     }
@@ -112,9 +112,9 @@ fn monitored_line_drops() {
     let t: JoinHandle<Result<(), Crash<()>>> =
         spawn(move || block_on(d2.manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(report) = crash {
-        assert_eq!(device_id, report.device_id);
-        assert_eq!(report.result, Fault::Drop);
+    if let Crash::Cascade(did, result) = crash {
+        assert_eq!(did, device_id);
+        assert!(result.is_drop());
     } else {
         unreachable!();
     }
@@ -161,9 +161,9 @@ fn peer_device_crashes() {
         spawn(move || block_on(d2.manage(pending())));
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(report) = crash {
-        assert_eq!(report.device_id, device_id);
-        assert!(report.result.is_error());
+    if let Crash::Cascade(did, result) = crash {
+        assert_eq!(did, device_id);
+        assert!(result.is_error());
     } else {
         unreachable!();
     }
@@ -181,9 +181,9 @@ fn peer_line_crashes() {
         spawn(move || block_on(d2.manage(pending())));
     assert_eq!((), t1.join().unwrap());
     let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(report) = crash {
-        assert_eq!(report.device_id, device_id);
-        assert!(report.result.is_error());
+    if let Crash::Cascade(did, result) = crash {
+        assert_eq!(did, device_id);
+        assert!(result.is_error());
     } else {
         unreachable!();
     }
@@ -201,9 +201,9 @@ fn peer_device_drops() {
     let t: JoinHandle<Result<(), Crash<()>>> =
         spawn(move || block_on(d2.manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(report) = crash {
-        assert_eq!(device_id, report.device_id);
-        assert_eq!(report.result, Fault::Drop);
+    if let Crash::Cascade(did, result) = crash {
+        assert_eq!(did, device_id);
+        assert!(result.is_drop());
     } else {
         unreachable!();
     }
@@ -222,9 +222,9 @@ fn peer_link_drops() {
     let t: JoinHandle<Result<(), Crash<()>>> =
         spawn(move || block_on(d2.manage(pending())));
     let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(report) = crash {
-        assert_eq!(device_id, report.device_id);
-        assert_eq!(report.result, Fault::Drop);
+    if let Crash::Cascade(did, result) = crash {
+        assert_eq!(did, device_id);
+        assert!(result.is_drop());
     } else {
         unreachable!();
     }
