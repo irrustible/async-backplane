@@ -32,10 +32,10 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        if let Poll::Ready(t) = this.future2.poll(cx) {
+        if let Poll::Ready(t) = this.future1.poll(cx) {
             return Poll::Ready(t);
         }
-        if let Poll::Ready(t) = this.future1.poll(cx) {
+        if let Poll::Ready(t) = this.future2.poll(cx) {
             return Poll::Ready(t);
         }
         Poll::Pending
