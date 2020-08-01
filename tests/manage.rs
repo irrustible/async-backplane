@@ -1,232 +1,225 @@
-use async_backplane::*;
+use async_backplane::prelude::*;
 use futures_lite::future::{pending, ready, block_on};
 use std::thread::{spawn, JoinHandle};
+
+fn assert_disconnect(d: Device, fault: Option<Fault>) {
+    assert_eq!((), spawn(move || d.disconnect(fault)).join().unwrap());
+}
+
+fn fail(d: Device) -> JoinHandle<Result<(), Crash<()>>> {
+    spawn(move || block_on(d.manage(pending())))
+}
+
+fn succeed(d: Device) -> JoinHandle<Result<(), Crash<()>>> {
+    spawn(move || block_on(d.manage(ready(Ok(())))))
+}
+
+fn watch(mut d: Device) -> JoinHandle<Result<Watched<()>, Crash<()>>> {
+    spawn(move || block_on(d.watch(ready(()))))
+}
 
 #[test]
 fn solo_succeeds() {
     let d = Device::new();
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d.manage(ready(Ok(())))));
-    assert_eq!((), t.join().unwrap().expect("success"));
+    assert_eq!((), succeed(d).join().unwrap().unwrap());
 }
 
 #[test]
 fn monitored_device_succeeds() {
     let d1 = Device::new();
     let d2 = Device::new();
+    let d3 = Device::new();
+    let i2 = d2.device_id();
     d2.link(&d1, LinkMode::Monitor);
-
-    let t1 = spawn(move || d1.disconnect(None));
-    assert_eq!((), t1.join().unwrap());
-
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(ready(Ok(())))));
-    assert_eq!((), t2.join().unwrap().expect("success"));
+    d3.link(&d2, LinkMode::Monitor);
+    assert_disconnect(d1, None);
+    assert_eq!((), succeed(d2).join().unwrap().unwrap());
+    assert_eq!(Messaged(Disconnected(i2, None)), watch(d3).join().unwrap().unwrap());
 }
 
 #[test]
 fn monitored_line_succeeds() {
     let d1 = Device::new();
     let d2 = Device::new();
-    let line = d1.line();
-    d2.link_line(line, LinkMode::Monitor).expect("link");
-
-    let t1 = spawn(move || d1.disconnect(None));
-    assert_eq!((), t1.join().unwrap());
-
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(ready(Ok(())))));
-    assert_eq!((), t2.join().unwrap().expect("success"));
+    let d3 = Device::new();
+    let i2 = d2.device_id();
+    d2.link_line(d1.line(), LinkMode::Monitor).unwrap();
+    d3.link(&d2, LinkMode::Monitor);
+    assert_disconnect(d1, None);
+    assert_eq!((), succeed(d2).join().unwrap().unwrap());
+    assert_eq!(Messaged(Disconnected(i2, None)), watch(d3).join().unwrap().unwrap());
 }
 
-
 #[test]
-fn monitored_device_crashes() {
+fn monitored_device_errors() {
     let d1 = Device::new();
     let d2 = Device::new();
-    let device_id = d1.device_id();
+    let d3 = Device::new();
+    let i1 = d1.device_id();
+    let i2 = d2.device_id();
     d2.link(&d1, LinkMode::Monitor);
-    let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
-    assert_eq!((), t1.join().unwrap());
-    let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, result) = crash {
-        assert_eq!(did, device_id);
-        assert!(result.is_error());
-    } else {
-        unreachable!();
-    }
+    d3.link(&d2, LinkMode::Monitor);
+    assert_disconnect(d1, Some(Fault::Error));
+    if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
+        assert_eq!(i1, did);
+        assert_eq!(result, Fault::Error);
+    } else { panic!() }
+    let r3 = watch(d3).join().unwrap().unwrap();
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
 }
 
 #[test]
-fn monitored_line_crashes() {
+fn monitored_line_errors() {
     let d1 = Device::new();
     let d2 = Device::new();
-    let device_id = d1.device_id();
-    let line = d1.line();
-    d2.link_line(line, LinkMode::Monitor).expect("link");
-    let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
-    assert_eq!((), t1.join().unwrap());
-    let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, result) = crash {
-        assert_eq!(did, device_id);
-        assert!(result.is_error());
-    } else {
-        unreachable!();
-    }
+    let d3 = Device::new();
+    let i1 = d1.device_id();
+    let i2 = d2.device_id();
+    d2.link_line(d1.line(), LinkMode::Monitor).unwrap();
+    d3.link(&d2, LinkMode::Monitor);
+    assert_disconnect(d1, Some(Fault::Error));
+    if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
+        assert_eq!(did, i1);
+        assert_eq!(result, Fault::Error);
+    } else { panic!() }
+    let r3 = watch(d3).join().unwrap().unwrap();
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
 }
 
 #[test]
 fn monitored_device_drops() {
     let d2 = Device::new();
-    let device_id = {
+    let d3 = Device::new();
+    let i2 = d2.device_id();
+    d3.link(&d2, LinkMode::Monitor);
+    let i1 = {
         let d1 = Device::new();
-        let id = d1.device_id();
         d2.link(&d1, LinkMode::Monitor);
-        id
+        d1.device_id()
     };
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
-    let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, result) = crash {
-        assert_eq!(did, device_id);
-        assert!(result.is_drop());
-    } else {
-        unreachable!();
-    }
+    if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
+        assert_eq!(did, i1);
+        assert_eq!(result, Fault::Drop);
+    } else { panic!() }
+    let r3 = watch(d3).join().unwrap().unwrap();
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
 }
 
 #[test]
 fn monitored_line_drops() {
     let d2 = Device::new();
-    let device_id = {
+    let d3 = Device::new();
+    let i2 = d2.device_id();
+    d3.link(&d2, LinkMode::Monitor);
+    let i1 = {
         let d1 = Device::new();
-        let line = d1.line();
-        let id = d1.device_id();
-        d2.link_line(line, LinkMode::Monitor).expect("link");
-        id
+        d2.link_line(d1.line(), LinkMode::Monitor).unwrap();
+        d1.device_id()
     };
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
-    let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, result) = crash {
-        assert_eq!(did, device_id);
-        assert!(result.is_drop());
-    } else {
-        unreachable!();
-    }
+    if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
+        assert_eq!(did, i1);
+        assert_eq!(result, Fault::Drop);
+    } else { panic!() }
+    let r3 = watch(d3).join().unwrap().unwrap();
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
 }
 
 #[test]
 fn peer_device_succeeds() {
     let d1 = Device::new();
     let d2 = Device::new();
+    let d3 = Device::new();
+    let i2 = d2.device_id();
     d2.link(&d1, LinkMode::Peer);
-
-    let t1 = spawn(move || d1.disconnect(None));
-    assert_eq!((), t1.join().unwrap());
-
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(ready(Ok(())))));
-    assert_eq!((), t2.join().unwrap().expect("success"));
+    d3.link(&d2, LinkMode::Peer);
+    assert_disconnect(d1, None);
+    assert_eq!((), succeed(d2).join().unwrap().unwrap());
+    assert_eq!(Messaged(Disconnected(i2, None)), watch(d3).join().unwrap().unwrap());
 }
 
 #[test]
 fn peer_line_succeeds() {
     let d1 = Device::new();
     let d2 = Device::new();
-    let line = d1.line();
-    d2.link_line(line, LinkMode::Peer).expect("link");
-
-    let t1 = spawn(move || d1.disconnect(None));
-    assert_eq!((), t1.join().unwrap());
-
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(ready(Ok(())))));
-    assert_eq!((), t2.join().unwrap().expect("success"));
+    let d3 = Device::new();
+    let i2 = d2.device_id();
+    d2.link_line(d1.line(), LinkMode::Peer).unwrap();
+    d3.link(&d2, LinkMode::Peer);
+    assert_disconnect(d1, None);
+    assert_eq!((), succeed(d2).join().unwrap().unwrap());
+    assert_eq!(Messaged(Disconnected(i2, None)), watch(d3).join().unwrap().unwrap());
 }
 
-
 #[test]
-fn peer_device_crashes() {
+fn peer_device_errors() {
     let d1 = Device::new();
     let d2 = Device::new();
-    let device_id = d1.device_id();
+    let d3 = Device::new();
+    let i1 = d1.device_id();
+    let i2 = d2.device_id();
     d2.link(&d1, LinkMode::Peer);
-    let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
-    assert_eq!((), t1.join().unwrap());
-    let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, result) = crash {
-        assert_eq!(did, device_id);
-        assert!(result.is_error());
-    } else {
-        unreachable!();
-    }
+    d3.link(&d2, LinkMode::Peer);
+    assert_disconnect(d1, Some(Fault::Error));
+    if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
+        assert_eq!(i1, did);
+        assert_eq!(result, Fault::Error);
+    } else { panic!() }
+    let r3 = watch(d3).join().unwrap().unwrap();
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
 }
 
 #[test]
-fn peer_line_crashes() {
+fn peer_line_errors() {
     let d1 = Device::new();
     let d2 = Device::new();
-    let device_id = d1.device_id();
-    let line = d1.line();
-    d2.link_line(line, LinkMode::Peer).expect("link");
-    let t1 = spawn(move || d1.disconnect(Some(Fault::Error)));
-    let t2: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
-    assert_eq!((), t1.join().unwrap());
-    let crash = t2.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, result) = crash {
-        assert_eq!(did, device_id);
-        assert!(result.is_error());
-    } else {
-        unreachable!();
-    }
+    let d3 = Device::new();
+    let i1 = d1.device_id();
+    let i2 = d2.device_id();
+    d2.link_line(d1.line(), LinkMode::Peer).unwrap();
+    d3.link(&d2, LinkMode::Peer);
+    assert_disconnect(d1, Some(Fault::Error));
+    if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
+        assert_eq!(i1, did);
+        assert_eq!(result, Fault::Error);
+    } else { panic!() }
+    let r3 = watch(d3).join().unwrap().unwrap();
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
 }
 
 #[test]
 fn peer_device_drops() {
     let d2 = Device::new();
-    let device_id = {
+    let d3 = Device::new();
+    let i2 = d2.device_id();
+    d3.link(&d2, LinkMode::Peer);
+    let i1 = {
         let d1 = Device::new();
-        let id = d1.device_id();
         d2.link(&d1, LinkMode::Peer);
-        id
+        d1.device_id()
     };
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
-    let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, result) = crash {
-        assert_eq!(did, device_id);
-        assert!(result.is_drop());
-    } else {
-        unreachable!();
-    }
+    if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
+        assert_eq!(did, i1);
+        assert_eq!(result, Fault::Drop);
+    } else { panic!() }
+    let r3 = watch(d3).join().unwrap().unwrap();
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
 }
 
 #[test]
 fn peer_link_drops() {
     let d2 = Device::new();
-    let device_id = {
+    let d3 = Device::new();
+    let i2 = d2.device_id();
+    d3.link(&d2, LinkMode::Peer);
+    let i1 = {
         let d1 = Device::new();
-        let line = d1.line();
-        let id = d1.device_id();
-        d2.link_line(line, LinkMode::Peer).expect("link");
-        id
+        d2.link_line(d1.line(), LinkMode::Peer).unwrap();
+        d1.device_id()
     };
-    let t: JoinHandle<Result<(), Crash<()>>> =
-        spawn(move || block_on(d2.manage(pending())));
-    let crash = t.join().unwrap().unwrap_err();
-    if let Crash::Cascade(did, result) = crash {
-        assert_eq!(did, device_id);
-        assert!(result.is_drop());
-    } else {
-        unreachable!();
-    }
+    if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
+        assert_eq!(did, i1);
+        assert_eq!(result, Fault::Drop);
+    } else { panic!() }
+    let r3 = watch(d3).join().unwrap().unwrap();
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
 }
-

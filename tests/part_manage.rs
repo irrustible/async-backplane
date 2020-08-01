@@ -19,11 +19,6 @@ fn watch(mut d: Device) -> JoinHandle<Result<Watched<()>, Crash<()>>> {
     spawn(move || block_on(d.watch(ready(()))))
 }
 
-// fn yes(d: Device) {
-//     let thread: JoinHandle<Result<(Device, ()), Crash<()>>> =
-//         spawn(move || block_on(d2.part_manage(ready(Ok(())))));
-// }
-
 #[test]
 fn solo_succeeds() {
     let d1 = Device::new();
@@ -144,12 +139,13 @@ fn monitored_line_succeeds() {
     let d1 = Device::new();
     let d2 = Device::new();
     let d3 = Device::new();
-    let device_id = d2.device_id();
+    let i2 = d2.device_id();
     let line = d1.line();
     d2.link_line(line, LinkMode::Monitor).unwrap();
     d3.link(&d2, LinkMode::Monitor);
     assert_disconnect(d1, None);
     let (d4, result) = succeed(d2).join().unwrap().unwrap();
+    assert_eq!(d4.device_id(), i2);
     assert_eq!(result, ());
     assert_eq!(Completed(()), watch(d3).join().unwrap().unwrap());
 }
