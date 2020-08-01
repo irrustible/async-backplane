@@ -102,10 +102,9 @@ just returns the first of the provided future's result and the next
 disconnect to occur.
 
 One of the more useful things you can do with watch is recreate
-futures that have failed. Indeed, this is how erlang Supervisors work!
-
-There's lot of work still to do here. Much of it will probably be in
-libraries that build on top of this one.
+futures that have failed. Indeed, this is how supervisors work, both
+in erlang and the library i'm currently building,
+[async-supervisors](https://github.com/irrustible/async-supervisors)
 
 ### Static link topologies
 
@@ -187,7 +186,7 @@ These work great alongside `async-backplane`:
 
 Note: these will likely be new libraries, linked from here when public.
 
-* Supervisors and recovery mechanisms.
+* Supervisors: [async-supervisors](https://github.com/irrustible/async-supervisors)
 * Actors.
 * no_std support.
 
