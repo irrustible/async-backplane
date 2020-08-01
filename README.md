@@ -23,9 +23,9 @@ Beta quality. Everything appears to work correctly, but we want to
 write more tests before we feel confident it is correct. I have fixed
 little bugs as I've noticed them, so clearly we needed better tests.
 
-The API may change slightly before the initial crates release, but
-nothing major, I hope. Broadly speaking, I'm delighted with it, I'm
-just polishing it up and trying to make the documentation less awful.
+The API may change slightly before 1.0, but nothing major, I
+hope. Broadly speaking, I'm delighted with it and any changes are
+likely to be small, when I discover things I can't do with it.
 
 ## Guide
 
