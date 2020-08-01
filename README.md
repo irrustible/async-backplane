@@ -1,8 +1,8 @@
 # async-backplane
 
-<!-- [![License](https://img.shields.io/crates/l/async-backplane.svg)](https://github.com/irrustible/async-backplane/blob/main/LICENSE) -->
-<!-- [![Package](https://img.shields.io/crates/v/async-backplane.svg)](https://crates.io/crates/async-backplane) -->
-<!-- [![Documentation](https://docs.rs/async-backplane/badge.svg)](https://docs.rs/async-backplane) -->
+[![License](https://img.shields.io/crates/l/async-backplane.svg)](https://github.com/irrustible/async-backplane/blob/main/LICENSE)
+[![Package](https://img.shields.io/crates/v/async-backplane.svg)](https://crates.io/crates/async-backplane)
+[![Documentation](https://docs.rs/async-backplane/badge.svg)](https://docs.rs/async-backplane)
 
 Easy, Erlang-inspired fault-tolerance framework for Rust Futures.
 
@@ -119,8 +119,8 @@ fn demo() {
     let a = Device::new();
     let b = Device::new();
     let c = Device::new();
-    a.link(b, LinkMode::Peer);
-    b.link(c, LinkMode::Peer);
+    a.link(&b, LinkMode::Peer);
+    b.link(&c, LinkMode::Peer);
     // ... now go spawn them all ...
 }
 ```
@@ -134,12 +134,14 @@ cloned and passed around freely.
 
 Getting a `Line` is simple: `device.line()`. Linking to a `Line` from
 a `Device` is much like linking to a `Device`, except we call
-`link_line()` instead of `link()`. Unlike `link()`, it may fail
-because the `Device` the line is connected to has disconnected, so it
-returns a `Result`.
+`link_line()` instead of `link()`. Unlike `link()`:
+
+* It consumes the provided Line (to avoid an unnecessary clone)
+* It may fail because the `Device` the line is connected to has
+  disconnected, so it returns a `Result`.
 
 You can link between `Lines` directly as well: `Line` also has a
-`link_line()` method:
+`link_line()` method!
 
 ```rust
 use async_backplane::*;
@@ -151,7 +153,7 @@ fn demo() {
     let c2 = c.line();
     let d = Device::new();
     let d2 = d.line();
-    a.link(b, LinkMode::Peer);
+    a.link(&b, LinkMode::Peer);
     b.link_line(c2, LinkMode::Peer).unwrap();
     c2.link_line(d2, LinkMode::Peer).unwrap();
     // ... now go spawn them all ...
