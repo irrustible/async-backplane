@@ -184,7 +184,7 @@ There are three logical steps here:
 * Creating the Device (`Device::new()`).
 * Spawning a Future on the executor (`Task::spawn(...).detach()`).
 * In the spawned Future, putting the Device into managed mode
-  with an async block to execute (`device.manage(async { Ok(()) }`)`
+  with an async block to execute (`device.manage(async { Ok(()) })`)`
 
 The async block you provide to `Device.manage()` should return a
 `Result` of some kind. If you return `Ok`, the Device will be
