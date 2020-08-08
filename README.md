@@ -277,9 +277,9 @@ you have not previously linked with the corresponding `Line`s.
 ### Differences from Erlang/OTP
 
 While I am very heavily inspired by Erlang and the OTP principles,
-there's a bit of an impedance mismatch between the two, in particular
+there's a bit of an impedance mismatch Rust and Erlang, in particular
 when it comes to ownership versus garbage collection. backplane is
-thus an adaptation of the principles that "feels right" for rust.
+thus an adaptation of the principles that "feels right" for Rust.
 
 Where it's ended up after a few months of R+D is as a lower level tool
 that tries not to be too pushy and opinionated and is extremely small.
@@ -340,8 +340,13 @@ on reddit by request. Just my opinion, others are available.
 
 These work great alongside `async-backplane`:
 
+* [async-oneshot](https://github.com/irrustible/async-oneshot) - a
+  fast, small, full-featured, no-std compatible oneshot channel
+  library.
+* [async-oneshot-local](https://github.com/irrustible/async-oneshot) -
+  the single-threaded partner to `async-oneshot`.
 * [async-channel](https://github.com/stjepang/async-channel/) - great
-  all-purpose async-aware channel.
+  all-purpose async-aware MPMC channel.
 * [smol](https://github.com/stjepang/smol/) - small, high-performance
   multithreaded futures executor.
   
