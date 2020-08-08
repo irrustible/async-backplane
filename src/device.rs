@@ -1,7 +1,8 @@
 use concurrent_queue::PopError;
-use futures_lite::{Future, Stream, StreamExt};
+use futures_lite::{Future, FutureExt, Stream, StreamExt};
 use std::any::Any;
 use std::cell::RefCell;
+use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -9,8 +10,7 @@ use crate::*;
 use crate::Watched::{Completed, Messaged};
 use crate::linemap::LineMap;
 use crate::plugboard::Plugboard;
-use crate::utils::{biased_race, DontPanic};
-use std::fmt::Debug;
+use crate::panic::dont_panic;
 
 /// A Device connects a Future to the backplane.
 #[derive(Debug)]
@@ -146,6 +146,11 @@ impl Device {
         }
     }
 
+    /// Attempts to get the next message. Does not wait for one to arrive.
+    pub fn receive(&self) -> Option<Message> {
+        self.plugboard.messages.try_pop().ok()
+    }
+
     /// Returns the first of (with a bias towards the former):
     /// * The next message to be received.
     /// * The result of the completed future.
@@ -155,19 +160,16 @@ impl Device {
     where F: Future + Unpin,
           F::Output: Debug,
           C: 'static + Any + Debug + Send {
-        let mut future = DontPanic::new(f);
-        biased_race(
-            async {
-                let message = self.next().await.expect("The Device to still be usable.");
-                Ok(Messaged(message))
-            },
-            async {
-                match (&mut future).await {
-                    Ok(val) => Ok(Completed(val)),
-                    Err(unwind) => Err(Crash::Panic(unwind)),
-                }
+        let fut = dont_panic(f);
+        async {
+            let message = self.next().await.expect("The Device to still be usable.");
+            Ok(Messaged(message))
+        }.or(async {
+            match fut.await {
+                Ok(val) => Ok(Completed(val)),
+                Err(unwind) => Err(Crash::Panic(unwind)),
             }
-        ).await
+        }).await
     }
 
     /// Runs an async closure while monitoring for messages. Messages

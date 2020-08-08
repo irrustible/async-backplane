@@ -1,4 +1,4 @@
-use crate::{DeviceID, Fault, utils::Unwind};
+use crate::{DeviceID, Fault, panic::Unwind};
 
 /// Something went wrong with a Device.
 #[derive(Debug)]

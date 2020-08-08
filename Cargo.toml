@@ -14,8 +14,9 @@ readme = "README.md"
 
 [dependencies]
 atomic-waker = "1.0"
-concurrent-queue = "1.1"
-futures-lite = "0.1.5"
+concurrent-queue = "1.1.*" # https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
+futures-lite = "0.1"
+futures-micro = { git = "https://github.com/irrustible/futures-micro", branch = "main" }
 maybe-unwind = "0.3"
 pin-project-lite = "0.1"
 waker-queue = "0.1"

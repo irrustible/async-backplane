@@ -7,6 +7,7 @@ dependencies = [
  "atomic-waker",
  "concurrent-queue",
  "futures-lite",
+ "futures-micro",
  "maybe-unwind",
  "pin-project-lite",
  "waker-queue",
@@ -64,6 +65,14 @@ dependencies = [
  "parking",
  "pin-project-lite",
  "waker-fn",
+]
+
+[[package]]
+name = "futures-micro"
+version = "0.1.0"
+source = "git+https://github.com/irrustible/futures-micro?branch=main#823e00a794fc2b92341bc3eaa92783d0bf315f12"
+dependencies = [
+ "pin-project-lite",
 ]
 
 [[package]]

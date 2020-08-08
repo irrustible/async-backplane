@@ -1,6 +1,5 @@
 pub mod prelude;
 pub mod panic;
-pub mod utils;
 
 mod crash;
 pub use crash::Crash;
@@ -22,8 +21,6 @@ pub use watched::Watched;
 
 mod plugboard;
 mod linemap;
-
-// These are small, here will be fine.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// There was a problem Linking
