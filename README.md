@@ -28,7 +28,7 @@ most libraries that claim to be inspired by erlang. It is the plan
 that other libraries will provide a higher level experience. I'm
 working on some, which will be coming soon:
 
-* [async-supervisors](https://github.com/irrustible/async-supervisors)
+* [async-supervisor](https://github.com/irrustible/async-supervisor)
 
 ## Guide
 
@@ -150,7 +150,7 @@ fn main() {
 ```
 
 In a sense, we have just written our first supervisor! A new crate,
-[async-supervisors](https://github.com/irrustible/async-supervisors)
+[async-supervisor](https://github.com/irrustible/async-supervisor)
 is coming soon with erlang-style supervisors.
 
 ### Managed devices
@@ -352,7 +352,7 @@ These work great alongside `async-backplane`:
   
 These will, when they're finished:
 
-* [async-supervisors](https://github.com/irrustible/async-supervisors) -
+* [async-supervisor](https://github.com/irrustible/async-supervisor) -
   erlang-style supervisors for async-backplane.
 
 ## Performance
