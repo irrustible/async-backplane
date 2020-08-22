@@ -1,7 +1,7 @@
 [package]
 name = "async-backplane"
 version = "0.1.0"
-description = "Simple, Erlang-inspired reliability backplane for Rust Futures."
+description = "Simple, Erlang-inspired reliability framework for Rust Futures."
 keywords = ["async", "erlang", "reliability", "supervisor", "supervision"]
 categories = ["asynchronous", "concurrency", "rust-patterns"]
 homepage = "https://github.com/irrustible/async-backplane"
@@ -14,9 +14,9 @@ readme = "README.md"
 
 [dependencies]
 atomic-waker = "1.0"
-concurrent-queue = "1.1.*" # https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html
+concurrent-queue = ">= 1.2.1, < 1.2.2"
 futures-lite = "0.1"
-futures-micro = { git = "https://github.com/irrustible/futures-micro", branch = "main" }
+futures-micro = "0.2"
 maybe-unwind = "0.3"
 pin-project-lite = "0.1"
 waker-queue = "0.1"

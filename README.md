@@ -357,9 +357,41 @@ These will, when they're finished:
 
 ## Performance
 
-These numbers are random unscientific benchmark measurements from my
-shitty 2015 macbook pro. Your numbers may be different. Run the
-benchmarks, or better still, bench your real world code using it.
+I didn't spend terribly long developing the benchmarks, you should
+conduct your own if it really matters.
+
+Here are numbers from my Ryzen 3900X:
+
+```
+     Running target/release/deps/device-90347ed9496e0aaa
+
+running 11 tests
+test create_destroy              ... bench:         231 ns/iter (+/- 3)
+test device_monitor_drop         ... bench:         526 ns/iter (+/- 11)
+test device_monitor_drop_notify  ... bench:         604 ns/iter (+/- 12)
+test device_monitor_error_notify ... bench:         632 ns/iter (+/- 9)
+test device_peer_drop_notify     ... bench:         659 ns/iter (+/- 10)
+test device_peer_error_notify    ... bench:         671 ns/iter (+/- 10)
+test line_monitor_drop           ... bench:         634 ns/iter (+/- 11)
+test line_monitor_drop_notify    ... bench:         687 ns/iter (+/- 11)
+test line_monitor_error_notify   ... bench:         717 ns/iter (+/- 8)
+test line_peer_drop_notify       ... bench:         764 ns/iter (+/- 14)
+test line_peer_error_notify      ... bench:         778 ns/iter (+/- 9)
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 11 measured; 0 filtered out
+
+     Running target/release/deps/line-750db620e6752c99
+
+running 6 tests
+test create_destroy            ... bench:           8 ns/iter (+/- 0)
+test line_monitor_drop         ... bench:         637 ns/iter (+/- 8)
+test line_monitor_drop_notify  ... bench:         670 ns/iter (+/- 11)
+test line_monitor_error_notify ... bench:         698 ns/iter (+/- 8)
+test line_peer_drop_notify     ... bench:         843 ns/iter (+/- 7)
+test line_peer_error_notify    ... bench:         917 ns/iter (+/- 11)
+```
+
+And it still performs reasonably on my old 2015 macbook pro:
 
 ```
      Running target/release/deps/device-8add01b9803770b5
