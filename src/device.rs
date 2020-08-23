@@ -34,12 +34,18 @@ impl Inner {
         let mut last: Option<Message> = None; // avoid copying
         for (_, maybe) in self.out.drain() {
             if let Some(line) = maybe {
-                let m = last.take().unwrap_or_else(|| message.clone());
+                let m = last.take().unwrap_or_else(|| message);
                 if let Err(e) = line.send(m) {
                     last = Some(e);
                 }
             }
         }
+    }
+}
+
+impl Default for Device {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

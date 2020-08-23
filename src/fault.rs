@@ -24,10 +24,6 @@ impl Fault {
 
     /// Are we a cascade fault?
     pub fn is_cascade(&self) -> bool {
-        if let Fault::Cascade(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Fault::Cascade(_))
     }
 }
