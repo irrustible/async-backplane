@@ -1,5 +1,5 @@
 use async_backplane::prelude::*;
-use futures_lite::future::{block_on, pending, ready};
+use futures_lite::future::{block_on, ready};
 use std::thread::{spawn, JoinHandle};
 
 fn assert_disconnect(d: Device, fault: Option<Fault>) {
