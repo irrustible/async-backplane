@@ -1,3 +1,5 @@
+#![deny(clippy::all)]
+
 pub mod panic;
 pub mod prelude;
 
