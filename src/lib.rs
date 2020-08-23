@@ -1,5 +1,5 @@
-pub mod prelude;
 pub mod panic;
+pub mod prelude;
 
 mod crash;
 pub use crash::Crash;
@@ -19,8 +19,8 @@ pub use line::Line;
 mod watched;
 pub use watched::Watched;
 
-mod plugboard;
 mod linemap;
+mod plugboard;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// There was a problem Linking
@@ -38,9 +38,9 @@ pub enum LinkMode {
     /// Receive a notification when the other Device disconnects.
     Monitor = 0b01,
     /// Send a notification when we disconnect.
-    Notify  = 0b10,
+    Notify = 0b10,
     /// Monitor + Notify.
-    Peer    = 0b11,
+    Peer = 0b11,
 }
 
 impl LinkMode {
@@ -70,7 +70,6 @@ pub enum Message {
 use Message::{Disconnected, Shutdown};
 
 impl Message {
-
     /// Returns the DeviceID of the sender.
     pub fn sender(&self) -> DeviceID {
         match self {
@@ -81,13 +80,19 @@ impl Message {
 
     /// Unwraps the Disconnect notification or panics.
     pub fn unwrap_disconnected(&self) -> (DeviceID, Option<Fault>) {
-        if let Disconnected(did, fault) = self { (*did, *fault) }
-        else { panic!("Message was not Disconnected") }
+        if let Disconnected(did, fault) = self {
+            (*did, *fault)
+        } else {
+            panic!("Message was not Disconnected")
+        }
     }
 
     /// Unwraps the Shutdown request or panics.
     pub fn unwrap_shutdown(&self) -> DeviceID {
-        if let Shutdown(did) = self { *did }
-        else { panic!("Message was not Shutdown") }
+        if let Shutdown(did) = self {
+            *did
+        } else {
+            panic!("Message was not Shutdown")
+        }
     }
 }

@@ -13,7 +13,9 @@ pub use maybe_unwind::Unwind;
 
 /// Sets the thread local panic handler to record the unwind information.
 pub fn replace_panic_hook() {
-    panic::set_hook(Box::new(|info| { capture_panic_info(info); }));
+    panic::set_hook(Box::new(|info| {
+        capture_panic_info(info);
+    }));
 }
 
 /// Sets the thread local panic handler to record the unwind information
@@ -28,7 +30,9 @@ pub fn chain_panic_hook() {
 
 /// Run a future such that panics are converted into Unwinds.
 pub async fn dont_panic<F, T>(future: F) -> Result<T, Unwind>
-where F: Future<Output = T> {
+where
+    F: Future<Output = T>,
+{
     poll_state(Some(future), |future, ctx| {
         if let Some(ref mut fut) = future {
             let pin = unsafe { Pin::new_unchecked(fut) };
@@ -37,6 +41,9 @@ where F: Future<Output = T> {
                 Err(unwind) => Poll::Ready(Err(unwind)),
                 Ok(Poll::Pending) => Poll::Pending,
             }
-        } else { Poll::Pending }
-    }).await
+        } else {
+            Poll::Pending
+        }
+    })
+    .await
 }

@@ -1,4 +1,4 @@
-use crate::{DeviceID, Fault, panic::Unwind};
+use crate::{panic::Unwind, DeviceID, Fault};
 
 /// Something went wrong with a Device.
 #[derive(Debug)]
@@ -14,20 +14,30 @@ pub enum Crash<Error> {
 }
 
 impl<Error> Crash<Error> {
-
     /// Did the future unwind panic?
     pub fn is_panic(&self) -> bool {
-        if let Crash::Panic(_) = self { true } else { false }
+        if let Crash::Panic(_) = self {
+            true
+        } else {
+            false
+        }
     }
 
     /// Did the future return Err?
     pub fn is_error(&self) -> bool {
-        if let Crash::Error(_) = self { true } else { false }
+        if let Crash::Error(_) = self {
+            true
+        } else {
+            false
+        }
     }
 
     /// Did a Device we depend on fault?
     pub fn is_cascade(&self) -> bool {
-        if let Crash::Cascade(_, _) = self { true } else { false }
+        if let Crash::Cascade(_, _) = self {
+            true
+        } else {
+            false
+        }
     }
-
 }
