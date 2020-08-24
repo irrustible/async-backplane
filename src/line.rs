@@ -1,5 +1,5 @@
-use crate::*;
 use crate::plugboard::Plugboard;
+use crate::*;
 use core::fmt;
 use std::sync::Arc;
 
@@ -22,10 +22,16 @@ impl Line {
     }
 
     /// Links with a Device through its Line. Panics if you try to link to yourself.
-    pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
-        if self.device_id() == other.device_id() { panic!("Do not link to yourself."); }
-        if mode.monitor() { other.plugboard.plug(self.clone(), LinkError::LinkDown)?; }
-        if mode.notify() { self.plugboard.plug(other, LinkError::DeviceDown)?; }
+    pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError> {
+        if self.device_id() == other.device_id() {
+            panic!("Do not link to yourself.");
+        }
+        if mode.monitor() {
+            other.plugboard.plug(self.clone(), LinkError::LinkDown)?;
+        }
+        if mode.notify() {
+            self.plugboard.plug(other, LinkError::DeviceDown)?;
+        }
         Ok(())
     }
 
@@ -33,8 +39,15 @@ impl Line {
     pub fn unlink_line(&self, other: &Line, mode: LinkMode) {
         #[allow(unused_must_use)]
         if self.device_id() != other.device_id() {
-            if mode.monitor() { other.plugboard.unplug(self.device_id(), LinkError::LinkDown); }
-            if mode.notify() { self.plugboard.unplug(other.device_id(), LinkError::DeviceDown); }
+            if mode.monitor() {
+                other
+                    .plugboard
+                    .unplug(self.device_id(), LinkError::LinkDown);
+            }
+            if mode.notify() {
+                self.plugboard
+                    .unplug(other.device_id(), LinkError::DeviceDown);
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
 use async_backplane::prelude::*;
-use futures_lite::future::{pending, ready, block_on};
+use futures_lite::future::{block_on, pending, ready};
 // use futures_lite::stream::StreamExt;
 use std::thread::{spawn, JoinHandle};
 
@@ -58,9 +58,11 @@ fn monitored_device_errors() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(i1, did);
         assert_eq!(Fault::Error, result);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -77,9 +79,11 @@ fn monitored_device_drops() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert_eq!(result, Fault::Drop);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -110,9 +114,11 @@ fn peer_device_crashes() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert!(result.is_error());
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -121,7 +127,8 @@ fn peer_device_drops() {
     let d3 = Device::new();
     let i2 = d2.device_id();
     d3.link(&d2, LinkMode::Peer);
-    let i1 = { // d1 won't survive this block
+    let i1 = {
+        // d1 won't survive this block
         let d1 = Device::new();
         d2.link(&d1, LinkMode::Peer);
         d1.device_id()
@@ -129,9 +136,11 @@ fn peer_device_drops() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert_eq!(result, Fault::Drop);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -164,9 +173,11 @@ fn monitored_line_errors() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert!(result.is_error());
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -183,9 +194,11 @@ fn monitored_line_drops() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert_eq!(result, Fault::Drop);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -218,9 +231,11 @@ fn peer_line_crashes() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert!(result.is_error());
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -229,7 +244,8 @@ fn peer_line_drops() {
     let d3 = Device::new();
     let i2 = d2.device_id();
     d3.link(&d2, LinkMode::Peer);
-    let i1 = { // d1 won't survive this block
+    let i1 = {
+        // d1 won't survive this block
         let d1 = Device::new();
         d2.link_line(d1.line(), LinkMode::Peer).unwrap();
         d1.device_id()
@@ -237,8 +253,9 @@ fn peer_line_drops() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert_eq!(result, Fault::Drop);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
-

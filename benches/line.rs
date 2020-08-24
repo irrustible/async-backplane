@@ -7,7 +7,7 @@ use async_backplane::*;
 #[bench]
 fn create_destroy(b: &mut Bencher) {
     let d = Device::new();
-    b.iter(|| { black_box(d.line()) });
+    b.iter(|| black_box(d.line()));
 }
 
 // create two devices, monitor one
