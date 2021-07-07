@@ -343,8 +343,6 @@ These work great alongside `async-backplane`:
 * [async-oneshot](https://github.com/irrustible/async-oneshot) - a
   fast, small, full-featured, no-std compatible oneshot channel
   library.
-* [async-oneshot-local](https://github.com/irrustible/async-oneshot) -
-  the single-threaded partner to `async-oneshot`.
 * [async-channel](https://github.com/stjepang/async-channel/) - great
   all-purpose async-aware MPMC channel.
 * [smol](https://github.com/stjepang/smol/) - small, high-performance
@@ -354,6 +352,8 @@ These will, when they're finished:
 
 * [async-supervisor](https://github.com/irrustible/async-supervisor) -
   erlang-style supervisors for async-backplane.
+* [async-oneshot-local](https://github.com/irrustible/async-oneshot) -
+  the single-threaded partner to `async-oneshot`.
 
 ## Performance
 
@@ -435,6 +435,14 @@ spend some time optimising this library, because we didn't yet.
 
 * no_std support.
 * Actors. Maybe.
+
+## Changelog
+
+### v0.1.1
+
+* Fixed `Crash.is_completed`
+
+I also fixed the clippy lints and rearranged a tiny bit of code.
 
 ## Copyright and License
 

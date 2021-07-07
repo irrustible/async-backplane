@@ -1,6 +1,6 @@
 [package]
 name = "async-backplane"
-version = "0.1.0"
+version = "0.1.1"
 description = "Simple, Erlang-inspired reliability framework for Rust Futures."
 keywords = ["async", "erlang", "reliability", "supervisor", "supervision"]
 categories = ["asynchronous", "concurrency", "rust-patterns"]
