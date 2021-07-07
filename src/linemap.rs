@@ -25,13 +25,20 @@ struct Small {
 }
 
 impl LineMap {
-
-    pub fn new() -> Self { LineMap{ inner: Inner::Small(Small::default()) } }
+    pub fn new() -> Self {
+        LineMap {
+            inner: Inner::Small(Small::default()),
+        }
+    }
 
     pub fn apply(&mut self, op: LineOp) {
         match op {
-            LineOp::Attach(line) => { self.attach(line); }
-            LineOp::Detach(did) => { self.detach(did); }
+            LineOp::Attach(line) => {
+                self.attach(line);
+            }
+            LineOp::Detach(did) => {
+                self.detach(did);
+            }
         }
     }
 
@@ -54,11 +61,9 @@ impl LineMap {
             Inner::Small(ref mut small) => small.inner.drain(..),
         }
     }
-
 }
 
 impl Small {
-
     fn attach(&mut self, line: Line) -> bool {
         let line_did = line.device_id();
         let mut last_free: Option<usize> = None;

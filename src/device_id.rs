@@ -1,5 +1,5 @@
-use core::fmt;
 pub use core::convert::From;
+use core::fmt;
 
 /// A locally unique identifier for a Device.
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -14,7 +14,9 @@ impl DeviceID {
 }
 
 impl From<DeviceID> for usize {
-    fn from(did: DeviceID) -> usize { did.inner }
+    fn from(did: DeviceID) -> usize {
+        did.inner
+    }
 }
 
 impl fmt::Debug for DeviceID {

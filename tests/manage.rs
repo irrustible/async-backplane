@@ -1,5 +1,5 @@
 use async_backplane::prelude::*;
-use futures_lite::future::{pending, ready, block_on};
+use futures_lite::future::{block_on, pending, ready};
 use std::thread::{spawn, JoinHandle};
 
 fn assert_disconnect(d: Device, fault: Option<Fault>) {
@@ -34,7 +34,10 @@ fn monitored_device_succeeds() {
     d3.link(&d2, LinkMode::Monitor);
     assert_disconnect(d1, None);
     assert_eq!((), succeed(d2).join().unwrap().unwrap());
-    assert_eq!(Messaged(Disconnected(i2, None)), watch(d3).join().unwrap().unwrap());
+    assert_eq!(
+        Messaged(Disconnected(i2, None)),
+        watch(d3).join().unwrap().unwrap()
+    );
 }
 
 #[test]
@@ -47,7 +50,10 @@ fn monitored_line_succeeds() {
     d3.link(&d2, LinkMode::Monitor);
     assert_disconnect(d1, None);
     assert_eq!((), succeed(d2).join().unwrap().unwrap());
-    assert_eq!(Messaged(Disconnected(i2, None)), watch(d3).join().unwrap().unwrap());
+    assert_eq!(
+        Messaged(Disconnected(i2, None)),
+        watch(d3).join().unwrap().unwrap()
+    );
 }
 
 #[test]
@@ -63,9 +69,11 @@ fn monitored_device_errors() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(i1, did);
         assert_eq!(result, Fault::Error);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -81,9 +89,11 @@ fn monitored_line_errors() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert_eq!(result, Fault::Error);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -100,9 +110,11 @@ fn monitored_device_drops() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert_eq!(result, Fault::Drop);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -119,9 +131,11 @@ fn monitored_line_drops() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert_eq!(result, Fault::Drop);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -134,7 +148,10 @@ fn peer_device_succeeds() {
     d3.link(&d2, LinkMode::Peer);
     assert_disconnect(d1, None);
     assert_eq!((), succeed(d2).join().unwrap().unwrap());
-    assert_eq!(Messaged(Disconnected(i2, None)), watch(d3).join().unwrap().unwrap());
+    assert_eq!(
+        Messaged(Disconnected(i2, None)),
+        watch(d3).join().unwrap().unwrap()
+    );
 }
 
 #[test]
@@ -147,7 +164,10 @@ fn peer_line_succeeds() {
     d3.link(&d2, LinkMode::Peer);
     assert_disconnect(d1, None);
     assert_eq!((), succeed(d2).join().unwrap().unwrap());
-    assert_eq!(Messaged(Disconnected(i2, None)), watch(d3).join().unwrap().unwrap());
+    assert_eq!(
+        Messaged(Disconnected(i2, None)),
+        watch(d3).join().unwrap().unwrap()
+    );
 }
 
 #[test]
@@ -163,9 +183,11 @@ fn peer_device_errors() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(i1, did);
         assert_eq!(result, Fault::Error);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -181,9 +203,11 @@ fn peer_line_errors() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(i1, did);
         assert_eq!(result, Fault::Error);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -200,9 +224,11 @@ fn peer_device_drops() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert_eq!(result, Fault::Drop);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }
 
 #[test]
@@ -219,7 +245,9 @@ fn peer_link_drops() {
     if let Crash::Cascade(did, result) = fail(d2).join().unwrap().unwrap_err() {
         assert_eq!(did, i1);
         assert_eq!(result, Fault::Drop);
-    } else { panic!() }
+    } else {
+        panic!()
+    }
     let r3 = watch(d3).join().unwrap().unwrap();
-    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3); 
+    assert_eq!(Messaged(Disconnected(i2, Some(Fault::Cascade(i1)))), r3);
 }

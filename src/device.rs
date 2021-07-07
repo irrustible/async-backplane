@@ -1,3 +1,8 @@
+use crate::linemap::LineMap;
+use crate::panic::dont_panic;
+use crate::plugboard::Plugboard;
+use crate::Watched::{Completed, Messaged};
+use crate::*;
 use concurrent_queue::PopError;
 use futures_lite::{Future, FutureExt, Stream, StreamExt};
 use std::any::Any;
@@ -6,11 +11,6 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use crate::*;
-use crate::Watched::{Completed, Messaged};
-use crate::linemap::LineMap;
-use crate::plugboard::Plugboard;
-use crate::panic::dont_panic;
 
 /// A Device connects a Future to the backplane.
 #[derive(Debug)]
@@ -46,12 +46,14 @@ impl Default for Device {
 }
 
 impl Device {
-
     /// Creates a new Device.
     pub fn new() -> Self {
         Device {
             plugboard: Arc::new(Plugboard::new()),
-            inner: RefCell::new(Inner { out: LineMap::new(), done: false }),
+            inner: RefCell::new(Inner {
+                out: LineMap::new(),
+                done: false,
+            }),
         }
     }
 
@@ -62,7 +64,9 @@ impl Device {
 
     /// Opens a line to the Device.
     pub fn line(&self) -> Line {
-        Line { plugboard: self.plugboard.clone() }
+        Line {
+            plugboard: self.plugboard.clone(),
+        }
     }
 
     /// Notify our peers we're disconnecting.
@@ -116,7 +120,7 @@ impl Device {
             self.inner.borrow_mut().out.detach(other.device_id());
         }
     }
-   
+
     /// Link with a line. This is safer than linking directly to a
     /// Device, but a little slower.
     pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
@@ -156,21 +160,24 @@ impl Device {
     /// * The next message to be received.
     /// * The result of the completed future.
     /// * The crash of the Device.
-    pub async fn watch<F, C>(&mut self, f: F)
-                             -> Result<Watched<<F as Future>::Output>, Crash<C>>
-    where F: Future + Unpin,
-          F::Output: Debug,
-          C: 'static + Any + Debug + Send {
+    pub async fn watch<F, C>(&mut self, f: F) -> Result<Watched<<F as Future>::Output>, Crash<C>>
+    where
+        F: Future + Unpin,
+        F::Output: Debug,
+        C: 'static + Any + Debug + Send,
+    {
         let fut = dont_panic(f);
         async {
             let message = self.next().await.expect("The Device to still be usable.");
             Ok(Messaged(message))
-        }.or(async {
+        }
+        .or(async {
             match fut.await {
                 Ok(val) => Ok(Completed(val)),
                 Err(unwind) => Err(Crash::Panic(unwind)),
             }
-        }).await
+        })
+        .await
     }
 
     /// Runs an async closure while monitoring for messages. Messages
@@ -188,14 +195,17 @@ impl Device {
     /// If the Device faults, either because the provided closure
     /// returned an Err variant or because a fault was propagated,
     /// announces our fault to our monitors.
-    pub async fn part_manage<'a, F, T, C>(mut self, mut f: F)
-                                          -> Result<(Device, T), Crash<C>>
-    where F: Future<Output = Result<T, C>> + Unpin,
-          C: 'static + Debug + Send,
-          T: Debug {
+    pub async fn part_manage<'a, F, T, C>(mut self, mut f: F) -> Result<(Device, T), Crash<C>>
+    where
+        F: Future<Output = Result<T, C>> + Unpin,
+        C: 'static + Debug + Send,
+        T: Debug,
+    {
         loop {
             match self.watch(&mut f).await {
-                Ok(Completed(Ok(val))) => { return Ok((self, val)); }
+                Ok(Completed(Ok(val))) => {
+                    return Ok((self, val));
+                }
                 Ok(Completed(Err(val))) => {
                     self.disconnect(Some(Fault::Error));
                     return Err(Crash::Error(val));
@@ -226,9 +236,11 @@ impl Device {
     /// Like `part_manage()`, but in the case of successful completion
     /// of the provided future, notifies our monitors and consumes self
     pub async fn manage<F, C, T>(self, f: F) -> Result<T, Crash<C>>
-    where F: Future<Output=Result<T,C>> + Unpin,
-          C: 'static + Debug + Send,
-          T: Debug {
+    where
+        F: Future<Output = Result<T, C>> + Unpin,
+        C: 'static + Debug + Send,
+        T: Debug,
+    {
         match self.part_manage(f).await {
             Ok((device, val)) => {
                 device.disconnect(None);
@@ -237,7 +249,6 @@ impl Device {
             Err(e) => Err(e),
         }
     }
-
 }
 
 impl Drop for Device {
@@ -245,11 +256,13 @@ impl Drop for Device {
         let mut inner = self.inner.borrow_mut();
         if !inner.done {
             self.plugboard.close(); // no more requests
-            while let Ok(op) = self.plugboard.line_ops.pop() { inner.out.apply(op); } // sync
+            while let Ok(op) = self.plugboard.line_ops.pop() {
+                inner.out.apply(op);
+            } // sync
             inner.send(Disconnected(self.device_id(), Some(Fault::Drop)));
         }
     }
- }
+}
 
 impl Unpin for Device {}
 

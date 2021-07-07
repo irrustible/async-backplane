@@ -1,5 +1,5 @@
-use core::fmt::Debug;
 use crate::Message;
+use core::fmt::Debug;
 
 /// A result from `watch()`.
 #[derive(Debug)]
@@ -13,7 +13,6 @@ pub enum Watched<T: Debug> {
 use Watched::{Completed, Messaged};
 
 impl<T: Debug> Watched<T> {
-
     /// True if the future completed.
     pub fn is_completed(&self) -> bool { matches!(self, Completed(_)) }
 
@@ -22,14 +21,20 @@ impl<T: Debug> Watched<T> {
 
     /// Take the completed result or panic.
     pub fn unwrap_completed(self) -> T {
-        if let Completed(c) = self { c }
-        else { panic!("Watched is not Completed"); }
+        if let Completed(c) = self {
+            c
+        } else {
+            panic!("Watched is not Completed");
+        }
     }
 
     /// Take the received message or panic.
     pub fn unwrap_messaged(self) -> Message {
-        if let Messaged(m) = self { m }
-        else { panic!("Watched is not Messaged"); }
+        if let Messaged(m) = self {
+            m
+        } else {
+            panic!("Watched is not Messaged");
+        }
     }
 }
 

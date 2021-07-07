@@ -1,4 +1,4 @@
-use crate::{DeviceID, Fault, panic::Unwind};
+use crate::{panic::Unwind, DeviceID, Fault};
 
 /// Something went wrong with a Device.
 #[derive(Debug)]
@@ -14,7 +14,6 @@ pub enum Crash<Error> {
 }
 
 impl<Error> Crash<Error> {
-
     /// Did the future unwind panic?
     pub fn is_panic(&self) -> bool { matches!(self, Crash::Panic(_)) }
 
