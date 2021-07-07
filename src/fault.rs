@@ -20,8 +20,6 @@ impl Fault {
     pub fn is_error(&self) -> bool { *self == Fault::Error }
 
     /// Are we a cascade fault?
-    pub fn is_cascade(&self) -> bool {
-        if let Fault::Cascade(_) = self { true } else { false }
-    }
+    pub fn is_cascade(&self) -> bool { matches!(self, Fault::Cascade(_)) }
     
 }

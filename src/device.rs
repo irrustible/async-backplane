@@ -34,11 +34,15 @@ impl Inner {
         let mut last: Option<Message> = None; // avoid copying
         for (_, maybe) in self.out.drain() {
             if let Some(line) = maybe {
-                let m = last.take().unwrap_or_else(|| message.clone());
+                let m = last.take().unwrap_or(message);
                 if let Err(e) = line.send(m) { last = Some(e); }
             }
         }
     }
+}
+
+impl Default for Device {
+    fn default() -> Self { Device::new() }
 }
 
 impl Device {
@@ -70,7 +74,8 @@ impl Device {
         self.plugboard.close(); // no more requests
         let mut inner = self.inner.borrow_mut();
         while let Ok(op) = self.plugboard.line_ops.pop() {
-            inner.out.apply(op); } // sync
+            inner.out.apply(op);
+        } // sync
         inner.send(Disconnected(self.device_id(), fault));
     }
 
@@ -81,17 +86,16 @@ impl Device {
     /// topology is not expected to change. You should not link to a
     /// Device this way after linking to it through a Line.
     pub fn link(&self, other: &Device, mode: LinkMode) {
-        if self.device_id() != other.device_id() {
-             if mode.monitor() {
-                 other.inner.borrow_mut().out
-                     .attach(Line { plugboard: self.plugboard.clone() });
-             }
-             if mode.notify() {
-                 self.inner.borrow_mut().out
-                     .attach(Line { plugboard: other.plugboard.clone() });
-             }
-        } else {
+        if self.device_id() == other.device_id() {
             panic!("Do not link to yourself!");
+        }
+        if mode.monitor() {
+            other.inner.borrow_mut().out
+                .attach(Line { plugboard: self.plugboard.clone() });
+        }
+        if mode.notify() {
+            self.inner.borrow_mut().out
+                .attach(Line { plugboard: other.plugboard.clone() });
         }
     }
 
@@ -102,47 +106,44 @@ impl Device {
     /// topology is not expected to change. You should not link to a
     /// Device this way after linking to it through a Line.
     pub fn unlink(&self, other: &Device, mode: LinkMode) {
-        if self.device_id() != other.device_id() {
-            if mode.monitor() {
-                other.inner.borrow_mut().out.detach(self.device_id());
-            }
-            if mode.notify() {
-                self.inner.borrow_mut().out.detach(other.device_id());
-            }
-        } else {
+        if self.device_id() == other.device_id() {
             panic!("Do not link to yourself!");
+        }
+        if mode.monitor() {
+            other.inner.borrow_mut().out.detach(self.device_id());
+        }
+        if mode.notify() {
+            self.inner.borrow_mut().out.detach(other.device_id());
         }
     }
    
     /// Link with a line. This is safer than linking directly to a
     /// Device, but a little slower.
     pub fn link_line(&self, other: Line, mode: LinkMode) -> Result<(), LinkError>{
-        if self.device_id() != other.device_id() {
-            if mode.monitor() {
-                other.plugboard.plug(self.line(), LinkError::LinkDown)?;
-            }
-            if mode.notify() {
-                self.inner.borrow_mut().out.attach(other);
-            }
-            Ok(())
-        } else {
+        if self.device_id() == other.device_id() {
             panic!("Do not link to yourself!");
         }
+        if mode.monitor() {
+            other.plugboard.plug(self.line(), LinkError::LinkDown)?;
+        }
+        if mode.notify() {
+            self.inner.borrow_mut().out.attach(other);
+        }
+        Ok(())
     }
 
     /// Unlink with a line. This is safer than linking directly to a
     /// Device, but a little slower.
     pub fn unlink_line(&self, other: &Line, mode: LinkMode) {
-        if self.device_id() != other.device_id() {
-            #[allow(unused_must_use)]
-            if mode.monitor() {
-                other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
-            }
-            if mode.notify() {
-                self.inner.borrow_mut().out.detach(other.device_id());
-            }
-        } else {
+        if self.device_id() == other.device_id() {
             panic!("Do not link to yourself!");
+        }
+        #[allow(unused_must_use)]
+        if mode.monitor() {
+            other.plugboard.unplug(self.device_id(), LinkError::LinkDown);
+        }
+        if mode.notify() {
+            self.inner.borrow_mut().out.detach(other.device_id());
         }
     }
 

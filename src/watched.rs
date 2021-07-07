@@ -15,14 +15,10 @@ use Watched::{Completed, Messaged};
 impl<T: Debug> Watched<T> {
 
     /// True if the future completed.
-    pub fn is_completed(&self) -> bool {
-        if let Messaged(_) = self { true } else { false }
-    }
+    pub fn is_completed(&self) -> bool { matches!(self, Completed(_)) }
 
     /// True if we received a message.
-    pub fn is_messaged(&self) -> bool {
-        if let Messaged(_) = self { true } else { false }
-    }
+    pub fn is_messaged(&self) -> bool { matches!(self, Messaged(_)) }
 
     /// Take the completed result or panic.
     pub fn unwrap_completed(self) -> T {

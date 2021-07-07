@@ -93,5 +93,4 @@ impl Small {
         }
         false
     }
-
 }

@@ -3,8 +3,6 @@ use crate::{DeviceID, Message, Line, LinkError};
 use crate::linemap::LineOp;
 use waker_queue::WakerQueue;
 
-
-
 #[derive(Debug)]
 pub(crate) struct Plugboard {
     pub line_ops: ConcurrentQueue<LineOp>,
@@ -40,5 +38,4 @@ impl Plugboard {
         self.line_ops.close();
         self.messages.close();
     } 
-
 }
